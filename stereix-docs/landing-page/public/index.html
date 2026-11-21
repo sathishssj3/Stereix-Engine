@@ -1406,11 +1406,24 @@ body::-webkit-scrollbar {
     box-sizing: border-box;
   }
   .hero {
-    min-height: auto !important;
+    min-height: calc(100svh - 3.75rem) !important;
+    min-height: calc(100dvh - 3.75rem) !important;
     margin-top: 3.75rem !important;
-    padding-top: 2.5rem !important;
-    padding-bottom: 4rem !important;
-    justify-content: flex-start !important;
+    padding-top: clamp(1rem, 3vh, 2.5rem) !important;
+    padding-bottom: clamp(1.5rem, 4vh, 3rem) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    box-sizing: border-box !important;
+  }
+  .hero-in {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 100% !important;
+    margin-inline: auto !important;
   }
   .hero-tag {
     font-size: 0.65rem !important;
@@ -1633,13 +1646,6 @@ body::-webkit-scrollbar {
   .section {
     padding-block: clamp(2.25rem, 6vw, 3.5rem);
   }
-  .hero {
-    min-height: auto !important;
-    margin-top: 3.75rem !important;
-    padding-top: 1rem !important;
-    padding-bottom: 0.75rem !important;
-    justify-content: flex-start !important;
-  }
   .hero-in {
     padding: 0 var(--gutter);
   }
@@ -1822,35 +1828,48 @@ body::-webkit-scrollbar {
     --gutter: 1.25rem;
   }
   .hero {
+    min-height: calc(100svh - 3.75rem) !important;
+    min-height: calc(100dvh - 3.75rem) !important;
     margin-top: 3.75rem !important;
-    padding-top: 2.25rem !important;
-    padding-bottom: 3.5rem !important;
-    justify-content: flex-start !important;
-    min-height: auto !important;
+    padding-top: clamp(1rem, 3vh, 2rem) !important;
+    padding-bottom: clamp(1.5rem, 4vh, 2.5rem) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    box-sizing: border-box !important;
+  }
+  .hero-in {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 100% !important;
+    margin-inline: auto !important;
   }
   .hero-tag {
     font-size: 0.625rem !important;
     letter-spacing: 0.16em !important;
     padding: 0.38rem 0.75rem !important;
-    margin-bottom: 2rem !important; /* Wispr Flow: 32px gap to headline */
+    margin-bottom: 1.25rem !important;
     gap: 0.45rem !important;
   }
   .d1 {
-    font-size: clamp(2.2rem, 9.8vw, 2.85rem) !important;
+    font-size: clamp(2.1rem, 9.2vw, 2.75rem) !important;
     line-height: 0.98 !important;
     letter-spacing: -0.035em !important;
     max-width: 100%;
-    margin-bottom: 1.75rem !important; /* Wispr Flow: 28px gap to lede */
+    margin-bottom: 1.15rem !important;
   }
   .d1 .ghost {
     max-width: 100%;
     white-space: nowrap;
   }
   .hero .lede {
-    font-size: 0.85rem !important;
-    line-height: 1.65 !important;
-    max-width: 35ch !important;
-    margin: 0 auto 2.25rem !important; /* Wispr Flow: 36px gap to buttons */
+    font-size: 0.9rem !important;
+    line-height: 1.6 !important;
+    max-width: 34ch !important;
+    margin: 0 auto 1.85rem !important;
     color: #8E8E96 !important;
   }
   .hero .btn-row {
@@ -1858,27 +1877,33 @@ body::-webkit-scrollbar {
     flex-direction: row !important;
     justify-content: center !important;
     align-items: center !important;
-    width: auto !important;
-    max-width: 100% !important;
-    margin: 0 auto 2.5rem !important; /* Wispr Flow: 40px gap to stats */
+    width: 100% !important;
+    max-width: 340px !important;
+    margin: 0 auto 2.25rem !important;
     gap: 0.75rem !important;
   }
   .hero .btn-row .btn {
-    flex: 0 1 auto !important;
+    flex: 1 1 0 !important;
     width: auto !important;
-    padding: 0.65rem 1.15rem !important;
-    font-size: 0.7rem !important;
+    padding: 0.75rem 0.85rem !important;
+    font-size: 0.72rem !important;
     letter-spacing: 0.08em !important;
-    min-height: 40px !important;
-    border-radius: 4px !important;
+    min-height: 44px !important;
+    border-radius: 6px !important;
+    text-align: center !important;
+    justify-content: center !important;
+    white-space: nowrap !important;
   }
   .rail-bar {
-    margin: 0 auto 3rem !important; /* Wispr Flow: 48px clearance at bottom */
+    margin: 0 auto !important;
+    width: 100% !important;
+    max-width: 340px !important;
     padding: 0 !important;
   }
   .rail {
-    max-width: 360px;
-    padding: 0.85rem 0;
+    width: 100% !important;
+    max-width: 340px !important;
+    padding: 0.85rem 0.25rem !important;
   }
   .rail b {
     font-size: 1.1rem;
