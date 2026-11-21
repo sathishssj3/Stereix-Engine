@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stereix Engine — Hero Preview (Anti-Slop Engineering Concept)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Rajdhani:wght@600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --void: #07070A;
+      --card-bg: #0D0D12;
+      --card-border: rgba(255, 255, 255, 0.08);
+      --red: #DC143C;
+      --red-bright: #FF2A55;
+      --cyan: #00F0FF;
+      --white: #EDEDF2;
+      --muted: #8E8E98;
+      --mono: 'JetBrains Mono', monospace;
+      --sans: 'Plus Jakarta Sans', sans-serif;
+      --display: 'Rajdhani', sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--void);
+      color: var(--white);
+      font-family: var(--sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Tactical Background CAD Grid */
+    .cad-bg {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, #000 30%, transparent 100%);
+      -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, #000 30%, transparent 100%);
+    }
+
+    /* Ambient Optical Glow */
+    .cad-bg::after {
+      content: '';
+      position: absolute;
+      top: 25%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 700px;
+      height: 380px;
+      background: radial-gradient(ellipse at center, rgba(220, 20, 60, 0.07) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    /* Top Navigation Mock */
+    .nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 50;
+      padding: 0.75rem 1.25rem 0;
+    }
+    .nav-in {
+      max-width: 1200px;
+      margin: 0 auto;
+      height: 3.85rem;
+      background: rgba(11, 11, 16, 0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1.5rem;
+    }
+    .brand {
+      font-family: var(--display);
+      font-weight: 800;
+      font-size: 1.05rem;
+      letter-spacing: 0.08em;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      color: var(--white);
+    }
+    .brand-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      background: var(--red);
+    }
+    .nav-badge {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      padding: 0.35rem 0.75rem;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+    }
+
+    /* Hero Section */
+    .hero {
+      position: relative;
+      z-index: 10;
+      min-height: 100vh;
+      min-height: 100svh;
+      padding-top: 5rem;
+      padding-bottom: 3rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      max-width: 1280px;
+      margin: 0 auto;
+      padding-inline: 1.5rem;
+    }
+
+    .hero-top-badge {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      letter-spacing: 0.16em;
+      color: var(--muted);
+      padding: 0.38rem 0.95rem;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .hero-top-badge .dot {
+      width: 6px;
+      height: 6px;
+      background: var(--red);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--red);
+    }
+
+    .d1 {
+      font-family: var(--display);
+      font-weight: 900;
+      text-transform: uppercase;
+      font-size: clamp(2.8rem, 7.5vw, 6.2rem);
+      line-height: 0.93;
+      letter-spacing: -0.035em;
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .d1 span {
+      display: block;
+      color: var(--white);
+    }
+    .d1 span.ghost {
+      color: rgba(255, 255, 255, 0.85);
+      text-shadow: 0 0 30px rgba(255, 255, 255, 0.12);
+    }
+
+    .lede {
+      font-size: clamp(0.95rem, 1.8vw, 1.15rem);
+      line-height: 1.6;
+      color: var(--muted);
+      text-align: center;
+      max-width: 52ch;
+      margin: 0 auto 2.25rem;
+    }
+
+    .btn-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.85rem;
+      margin-bottom: 3.5rem;
+      width: 100%;
+      max-width: 380px;
+    }
+    .btn {
+      font-family: var(--display);
+      font-weight: 700;
+      font-size: 0.82rem;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      padding: 0.75rem 1.4rem;
+      border-radius: 6px;
+      min-height: 46px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.25s ease;
+      flex: 1;
+    }
+    .btn-primary {
+      background: var(--red);
+      color: #fff;
+      border: 1px solid var(--red-bright);
+      box-shadow: 0 4px 20px rgba(220, 20, 60, 0.35);
+    }
+    .btn-primary:hover {
+      background: var(--red-bright);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 26px rgba(220, 20, 60, 0.5);
+    }
+    .btn-ghost {
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--white);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .btn-ghost:hover {
+      background: rgba(255, 255, 255, 0.07);
+      border-color: rgba(255, 255, 255, 0.25);
+      transform: translateY(-2px);
+    }
+
+    /* ============================================================
+       THE HERO INTERACTIVE PROOF VIEWPORT (Anti-Slop Showcase)
+       ============================================================ */
+    .showcase-frame {
+      width: 100%;
+      max-width: 1000px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 2.5rem;
+      transition: transform 0.2s cubic-bezier(0.2, 0, 0.1, 1);
+      perspective: 1200px;
+    }
+
+    /* Showcase Header Bar */
+    .showcase-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem 1.25rem;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--card-border);
+    }
+    .showcase-title {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      color: var(--white);
+    }
+    .status-led {
+      width: 7px;
+      height: 7px;
+      background: #10B981;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #10B981;
+    }
+
+    /* Tactile Mode Switcher in Viewport */
+    .mode-switch {
+      display: inline-flex;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      padding: 2px;
+      gap: 2px;
+    }
+    .mode-btn {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 0.35rem 0.75rem;
+      border-radius: 4px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .mode-btn.active {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--white);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+    .mode-btn.active.mode-3d {
+      background: var(--red);
+      color: #fff;
+    }
+
+    /* Interactive Viewport Canvas Area */
+    .viewport {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Background Game Image */
+    .game-layer {
+      position: absolute;
+      inset: 0;
+      background-image: url('delivery-01.png');
+      background-size: cover;
+      background-position: center;
+      transform: scale(1.02);
+      transition: filter 0.3s ease, transform 0.3s ease;
+    }
+
+    /* 3D Depth Map Overlay Layer (Simulated Z-Buffer) */
+    .depth-layer {
+      position: absolute;
+      inset: 0;
+      background-image: url('banners/widescreen-schematic-1920x1080.png');
+      background-size: cover;
+      background-position: center;
+      mix-blend-mode: screen;
+      opacity: 0.85;
+      pointer-events: none;
+      clip-path: polygon(50% 0, 100% 0, 100% 100%, 50% 100%);
+      transition: opacity 0.3s ease;
+    }
+
+    /* Interactive Split Divider Handle */
+    .split-divider {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 2px;
+      background: var(--cyan);
+      box-shadow: 0 0 14px var(--cyan);
+      cursor: ew-resize;
+      z-index: 20;
+    }
+    .split-handle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 32px;
+      height: 32px;
+      background: #0D0D12;
+      border: 1.5px solid var(--cyan);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 16px rgba(0, 240, 255, 0.5);
+    }
+    .split-handle svg {
+      width: 14px;
+      height: 14px;
+      fill: var(--cyan);
+    }
+
+    /* HUD Overlay Over Game */
+    .hud-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 15;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .hud-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .hud-pill {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.08em;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      padding: 0.35rem 0.65rem;
+      border-radius: 4px;
+      color: var(--white);
+    }
+    .hud-pill.cyan { border-color: rgba(0, 240, 255, 0.4); color: var(--cyan); }
+    .hud-pill.red { border-color: rgba(220, 20, 60, 0.4); color: var(--red-bright); }
+
+    .hud-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .hud-telemetry {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      color: var(--muted);
+      background: rgba(0, 0, 0, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      padding: 0.45rem 0.85rem;
+      display: flex;
+      gap: 1.25rem;
+    }
+    .hud-telemetry strong {
+      color: var(--white);
+    }
+
+    /* Tactical Corner Reticles */
+    .corner {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      border: 1.5px solid rgba(255, 255, 255, 0.25);
+    }
+    .tl { top: 12px; left: 12px; border-right: 0; border-bottom: 0; }
+    .tr { top: 12px; right: 12px; border-left: 0; border-bottom: 0; }
+    .bl { bottom: 12px; left: 12px; border-right: 0; border-top: 0; }
+    .br { bottom: 12px; right: 12px; border-left: 0; border-top: 0; }
+
+    /* Footer Stats Rail */
+    .rail-bar {
+      width: 100%;
+      max-width: 460px;
+      margin: 0 auto;
+    }
+    .rail {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-top: 1px solid var(--card-border);
+      border-bottom: 1px solid var(--card-border);
+      padding: 0.95rem 0;
+      text-align: center;
+    }
+    .rail div {
+      border-right: 1px solid var(--card-border);
+      padding: 0 0.5rem;
+    }
+    .rail div:last-child { border-right: none; }
+    .rail b {
+      font-family: var(--display);
+      font-size: 1.35rem;
+      font-weight: 700;
+      display: block;
+      color: var(--white);
+    }
+    .rail span {
+      font-family: var(--sans);
+      font-size: 0.58rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    @media (max-width: 640px) {
+      .hero {
+        padding-top: 4.5rem;
+        padding-bottom: 2rem;
+      }
+      .btn-row {
+        max-width: 340px;
+      }
+      .showcase-frame {
+        border-radius: 8px;
+        margin-bottom: 2rem;
+      }
+      .showcase-head {
+        padding: 0.5rem 0.85rem;
+      }
+      .hud-telemetry {
+        font-size: 0.55rem;
+        gap: 0.65rem;
+        padding: 0.35rem 0.55rem;
+      }
+      .hud-pill {
+        font-size: 0.55rem;
+        padding: 0.25rem 0.45rem;
+      }
+      .split-handle {
+        width: 26px;
+        height: 26px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- CAD Background Grid -->
+  <div class="cad-bg"></div>
+
+  <!-- Navigation Bar -->
+  <header class="nav">
+    <div class="nav-in">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span>STEREIX ENGINE</span>
+      </div>
+      <div class="nav-badge">PROTOTYPE PREVIEW</div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <main class="hero">
+    <div class="hero-top-badge">
+      <span class="dot"></span>
+      <span>OPENXR · DIRECTX 11/12 · VULKAN HOOK</span>
+    </div>
+
+    <h1 class="d1">
+      <span>ONE CLICK.</span>
+      <span class="ghost">ANY GAME IN VR.</span>
+    </h1>
+
+    <p class="lede">
+      Play your flat PC games in full 6DOF VR with one click. Real-time 3D depth, delivered straight to any OpenXR headset.
+    </p>
+
+    <div class="btn-row">
+      <a class="btn btn-primary" href="#notify">NOTIFY ME</a>
+      <a class="btn btn-ghost" href="#pipeline">SEE HOW IT WORKS</a>
+    </div>
+
+    <!-- Interactive Technical Proof Viewport -->
+    <div class="showcase-frame" id="showcase">
+      <!-- Reticle Corners -->
+      <div class="corner tl"></div>
+      <div class="corner tr"></div>
+      <div class="corner bl"></div>
+      <div class="corner br"></div>
+
+      <!-- Viewport Header -->
+      <div class="showcase-head">
+        <div class="showcase-title">
+          <span class="status-led"></span>
+          <span>INTERCEPT_VIEWPORT // HOGWARTS_LEGACY.EXE (DX12)</span>
+        </div>
+
+        <div class="mode-switch">
+          <button class="mode-btn active" id="btn2d">2D FLAT</button>
+          <button class="mode-btn mode-3d" id="btn3d">3D STEREO DEPTH</button>
+        </div>
+      </div>
+
+      <!-- Viewport Content Area -->
+      <div class="viewport" id="viewport">
+        <!-- Native Game Layer -->
+        <div class="game-layer" id="gameLayer"></div>
+
+        <!-- Reconstructed Hardware Depth Buffer Overlay -->
+        <div class="depth-layer" id="depthLayer"></div>
+
+        <!-- Split Wipe Line & Drag Handle -->
+        <div class="split-divider" id="divider">
+          <div class="split-handle">
+            <svg viewBox="0 0 24 24">
+              <path d="M8 7l-5 5 5 5V7zm8 0v10l5-5-5-5z"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- HUD Telemetry Overlay -->
+        <div class="hud-overlay">
+          <div class="hud-top">
+            <div class="hud-pill">HOOK: 0x7FFA891C [DX12 PRESENT]</div>
+            <div class="hud-pill cyan" id="modePill">MODE: 2D FLAT BUFFER</div>
+          </div>
+          <div class="hud-bottom">
+            <div class="hud-telemetry">
+              <span>FOV: <strong>96.4°</strong></span>
+              <span>RENDER OVERHEAD: <strong>0.84ms</strong></span>
+              <span>OPENXR: <strong>90 FPS SYNCED</strong></span>
+            </div>
+            <div class="hud-pill red">Z-BUFFER: LOCKED</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats Rail -->
+    <div class="rail-bar">
+      <div class="rail">
+        <div><b>3</b><span>GRAPHICS APIS</span></div>
+        <div><b>6</b><span>SHIPPED PROFILES</span></div>
+        <div><b>11.1ms</b><span>FRAME BUDGET</span></div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Interactive Wipe Slider & 2D/3D Mode Logic
+    const viewport = document.getElementById('viewport');
+    const divider = document.getElementById('divider');
+    const depthLayer = document.getElementById('depthLayer');
+    const gameLayer = document.getElementById('gameLayer');
+    const btn2d = document.getElementById('btn2d');
+    const btn3d = document.getElementById('btn3d');
+    const modePill = document.getElementById('modePill');
+    const showcase = document.getElementById('showcase');
+
+    let isDragging = false;
+
+    function setSplitPosition(percent) {
+      percent = Math.max(0, Math.min(100, percent));
+      divider.style.left = percent + '%';
+      depthLayer.style.clipPath = `polygon(${percent}% 0, 100% 0, 100% 100%, ${percent}% 100%)`;
+      if (percent < 30) {
+        modePill.textContent = 'MODE: HARDWARE DEPTH MAP';
+        modePill.className = 'hud-pill cyan';
+      } else if (percent > 70) {
+        modePill.textContent = 'MODE: 2D FLAT BUFFER';
+        modePill.className = 'hud-pill';
+      } else {
+        modePill.textContent = 'MODE: REAL-TIME STEREO DISPARITY';
+        modePill.className = 'hud-pill red';
+      }
+    }
+
+    function onMove(e) {
+      if (!isDragging && e.type !== 'mousemove') return;
+      const rect = viewport.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const percent = ((clientX - rect.left) / rect.width) * 100;
+      setSplitPosition(percent);
+    }
+
+    viewport.addEventListener('mousedown', (e) => { isDragging = true; onMove(e); });
+    window.addEventListener('mouseup', () => { isDragging = false; });
+    window.addEventListener('mousemove', onMove);
+
+    viewport.addEventListener('touchstart', (e) => { isDragging = true; onMove(e); }, { passive: true });
+    window.addEventListener('touchend', () => { isDragging = false; });
+    window.addEventListener('touchmove', onMove, { passive: true });
+
+    // Mode Toggle Buttons
+    btn2d.addEventListener('click', () => {
+      btn2d.classList.add('active');
+      btn3d.classList.remove('active');
+      setSplitPosition(100);
+      gameLayer.style.filter = 'none';
+    });
+
+    btn3d.addEventListener('click', () => {
+      btn3d.classList.add('active');
+      btn2d.classList.remove('active');
+      setSplitPosition(0);
+      gameLayer.style.filter = 'contrast(1.15) brightness(0.95)';
+    });
+
+    // 3D Mouse Parallax Effect on Showcase Frame
+    if (window.matchMedia('(pointer: fine)').matches) {
+      document.addEventListener('mousemove', (e) => {
+        const x = (e.clientX / window.innerWidth) - 0.5;
+        const y = (e.clientY / window.innerHeight) - 0.5;
+        showcase.style.transform = `perspective(1000px) rotateY(${x * 5}deg) rotateX(${-y * 5}deg) translateY(-2px)`;
+      });
+    }
+  </script>
+</body>
+</html>
