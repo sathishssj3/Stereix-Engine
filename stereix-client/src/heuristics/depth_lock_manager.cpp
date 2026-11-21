@@ -6,6 +6,7 @@
 #include "heuristics/depth_ranking_engine.h"
 #include "heuristics/reverse_z_detector.h"
 #include "core/subsystem_context.h"
+#include "core/logger.h"
 
 namespace vrinject {
 
@@ -20,16 +21,14 @@ void DepthLockManager::OnDeviceLost() {
 void DepthLockManager::OnFrameEnd(uint64_t frameNumber, uint32_t deviceGeneration, uint32_t swapchainGeneration, uint32_t swapchainWidth, uint32_t swapchainHeight) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    // If device generation or swapchain generation changed since last snapshot, we might be lost
     if (m_snapshot.IsValid() && (m_snapshot.deviceGeneration != deviceGeneration || m_snapshot.swapchainGeneration != swapchainGeneration)) {
         m_state = DepthLockState::RECOVERING;
-        m_snapshot = DepthSnapshot(); // invalidate
+        m_snapshot = DepthSnapshot();
         m_verificationFrames = 0;
     }
 
     auto candidates = SubsystemContext::Get().GetDepthCandidateCollector()->GetCandidatesSnapshot();
     
-    // Process pipeline
     for (auto& cand : candidates) {
         DepthClassifier::Classify(cand);
         DepthValidator::Validate(cand, swapchainWidth, swapchainHeight);
@@ -43,7 +42,6 @@ void DepthLockManager::OnFrameEnd(uint64_t frameNumber, uint32_t deviceGeneratio
         bestCandidate = &candidates[0];
     }
 
-    // State machine logic
     switch (m_state) {
         case DepthLockState::UNLOCKED:
         case DepthLockState::SEARCHING:
@@ -72,7 +70,13 @@ void DepthLockManager::OnFrameEnd(uint64_t frameNumber, uint32_t deviceGeneratio
                 m_snapshot.convention = ReverseZDetector::Detect(*bestCandidate, bestCandidate->lastClearDepth);
                 
                 if (m_verificationFrames >= REQUIRED_VERIFICATION_FRAMES) {
+                    DepthLockState prevState = m_state;
                     m_state = DepthLockState::LOCKED;
+                    if (prevState != DepthLockState::REVERIFYING) {
+                        LOG_INFO("[OK] Depth Buffer Locked: %ux%u (Format: %lld, Confidence: %.1f%%)",
+                                 m_snapshot.identity.width, m_snapshot.identity.height,
+                                 m_snapshot.identity.format, m_snapshot.confidence);
+                    }
                 }
             } else {
                 // Lost tracking or best candidate changed
@@ -84,8 +88,8 @@ void DepthLockManager::OnFrameEnd(uint64_t frameNumber, uint32_t deviceGeneratio
         case DepthLockState::LOCKED:
             if (bestCandidate && bestCandidate->identity == m_snapshot.identity) {
                 m_snapshot.confidence = bestCandidate->confidence;
-                // Still locked
-                if (m_snapshot.confidence < 80.0f) {
+                // Still locked â€” only re-verify if confidence drops below usable stereo threshold
+                if (m_snapshot.confidence < 50.0f) {
                     m_state = DepthLockState::REVERIFYING;
                 }
             } else {

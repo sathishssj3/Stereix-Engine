@@ -7,6 +7,10 @@ void DepthCandidateCollector::OnDepthSurfaceCreated(void* resourcePointer, uint3
     
     std::lock_guard<std::mutex> lock(m_mutex);
     
+    if (m_livingResources.find(resourcePointer) != m_livingResources.end()) {
+        return;
+    }
+    
     DepthResourceIdentity id;
     id.backend = GraphicsBackend::DX11; // Since we are currently relying on DX11 concepts here implicitly
     id.nativeHandle = resourcePointer;
@@ -18,10 +22,8 @@ void DepthCandidateCollector::OnDepthSurfaceCreated(void* resourcePointer, uint3
     id.mipLevels = mipLevels;
     id.epoch.resourceGeneration = generation;
     
-    // Register living resource mapping
     m_livingResources[resourcePointer] = id;
     
-    // Create new candidate
     if (m_candidates.find(id) == m_candidates.end()) {
         DepthCandidate candidate;
         candidate.identity = id;
@@ -35,6 +37,7 @@ void DepthCandidateCollector::OnDepthSurfaceReleased(void* resourcePointer) {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_livingResources.find(resourcePointer);
     if (it != m_livingResources.end()) {
+        m_candidates.erase(it->second);
         m_livingResources.erase(it);
     }
 }
@@ -71,10 +74,8 @@ void DepthCandidateCollector::OnOMSetRenderTargets(const GraphicsResourceIdentit
     
     std::lock_guard<std::mutex> lock(m_mutex);
     
-    // Register living resource mapping implicitly if new or changed
     m_livingResources[identity.nativeHandle] = identity;
     
-    // Create new candidate if necessary
     if (m_candidates.find(identity) == m_candidates.end()) {
         DepthCandidate candidate;
         candidate.identity = identity;
@@ -89,10 +90,8 @@ void DepthCandidateCollector::OnClearDepthStencilView(const GraphicsResourceIden
     
     std::lock_guard<std::mutex> lock(m_mutex);
     
-    // Register living resource mapping implicitly if new or changed
     m_livingResources[identity.nativeHandle] = identity;
     
-    // Create new candidate if necessary
     if (m_candidates.find(identity) == m_candidates.end()) {
         DepthCandidate candidate;
         candidate.identity = identity;
@@ -106,12 +105,21 @@ void DepthCandidateCollector::OnClearDepthStencilView(const GraphicsResourceIden
 void DepthCandidateCollector::OnFrameEnd(uint64_t frameNumber) {
     std::lock_guard<std::mutex> lock(m_mutex);
     
-    // Update frame seen counters and reset per-frame metrics where needed
     for (auto& pair : m_candidates) {
         if (pair.second.bindCount > 0 || pair.second.clearCount > 0) {
             pair.second.lastFrameSeen = pair.second.frameSeen;
             pair.second.frameSeen = frameNumber;
             pair.second.updateFrequency++;
+        }
+    }
+
+    // Prune stale candidates that have not been bound or cleared in > 30 frames
+    for (auto it = m_candidates.begin(); it != m_candidates.end(); ) {
+        if (it->second.frameSeen > 0 && frameNumber > it->second.frameSeen && (frameNumber - it->second.frameSeen > 30)) {
+            m_livingResources.erase(it->first.nativeHandle);
+            it = m_candidates.erase(it);
+        } else {
+            ++it;
         }
     }
 }
@@ -135,6 +143,12 @@ void DepthCandidateCollector::Clear() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_candidates.clear();
     m_livingResources.clear();
+}
+
+bool DepthCandidateCollector::IsResourceRegistered(void* resourcePointer) const {
+    if (!resourcePointer) return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_livingResources.find(resourcePointer) != m_livingResources.end();
 }
 
 } // namespace vrinject

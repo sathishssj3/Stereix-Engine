@@ -1,9 +1,15 @@
 {
-  "engineVersion": "0.1.99",
-  "buildDate": "2026-10-02",
-  "timestamp": 1790961703805,
-  "changelog": "Stereix Engine v0.1.99 — Critical Hotfix: OpenXR Asymmetric FOV Diplopia Elimination with 2D Stereo Convergence Offset, Dual-Eye ImGui Menu Unification, Debounced Analog Stick & D-Pad Gamepad Navigation, and 1-Click Recommended Defaults Reset Action",
+  "engineVersion": "0.1.118",
+  "buildDate": "2026-11-21",
+  "timestamp": 1795299999763,
+  "changelog": "Stereix Engine v0.1.110 � Universal IEC 61966-2-1 Display Calibration for Bit-Exact Monitor Color Fidelity, DX11 Compute State Initialization, Dynamic Flip-Model Swapchain Backbuffer Synchronization, and Guaranteed Monoscopic Fallback Protection",
   "features": [
+    "P0 Direct3D 12 Monoscopic Menu Fallback: Guaranteed 2D blit of game backbuffer directly to OpenXR swapchains during title screens, loading screens, and cinematics, eliminating black headset display",
+    "P0 Single-Queue Self-Healing Synchronization: Dynamic main command queue resolution across swapchain recreations, restoring active rendering after resolution or window changes",
+    "P0 SEH-Guarded Depth SRV Pipeline: Structured Exception Handling protection around depth buffer descriptors and views, preventing crashes on typed D32_FLOAT non-typeless allocations",
+    "P0 Floating OpenXR HUD Quad Layer: Hardware-accelerated XrCompositionLayerQuad presentation with alpha blending, decoupling 2D game menus and UI from 3D depth distortion",
+    "P0 10-Bit Color Pipeline (R10G10B10A2): Native DXGI_FORMAT_R10G10B10A2_UNORM support across OpenXR swapchains and intermediate eye buffers, eliminating banding in skies and fog",
+    "P0 Anti-Halo Contrast-Adaptive Sharpening (CAS): 4-neighbor bounded Laplacian sharpening compute filter guaranteeing razor-sharp lens clarity with zero stereo disparity noise",
     "P0.1 Virtual Controller Emulation: Full VR motion controller mapping to XInput with bidirectional haptic vibration feedback for native controller-free gameplay",
     "P0.2 Floating Curved World-Space HUD: Eliminates eye strain by projecting 2D UI passes onto an adjustable curved virtual canvas with configurable depth and curvature",
     "P1.1 Cutscene Auto-Theater Mode: Detects high-angular-jerk camera cuts during cinematics and deathblows, smoothly transitioning to a flat virtual cinema screen",
@@ -63,9 +69,9 @@
   ],
   "date": "2026-09-18T19:46:38.921Z",
   "hashes": {
-    "vrinject.dll": "3d9aaefbc0350f7ded122c97add69bae3f049b82d5900830083b859070854972",
-    "vr-inject-cli.exe": "f973aca64fc4c8559ca2051cb6a1c710066fd8c13511cffb7ec86c9cf1b242b9",
-    "profiles/814380_sekiro.json": "ab4d5f334a20dc0ac7eeaada8f14aa62e5f19a31a81c6cf3f5aaa049566091a3",
+    "vrinject.dll": "45f9a79fb08a4d869d59e2206bc51742eca4ca60b9f4efddc7c224e736040fb2",
+    "vr-inject-cli.exe": "06212cb54323badd1ec3232374d4522abbb780293c7cfb3eeee41b890008db19",
+    "profiles/814380_sekiro.json": "f8f81939c85c4bc1ed85e95f4f2e167f2615e72fb2a1ec63e29fab8c75b92efa",
     "profiles/990080_hogwarts_legacy.json": "af2035a15ce90d00050f8e8f577e4e6b6235be5e93d334040715c63f8e8b7144",
     "profiles/1091500_cyberpunk_2077.json": "08043689cbdacc9b7add01c05b2af17186a02739d20b50dfb0c42434860d7a05",
     "profiles/1623730_palworld.json": "300a1863c71d8989edb465d54787570b4d05149ff53b75b5f445392c9ebb93f4",
@@ -78,7 +84,7 @@
     "profiles/892970_valheim.json": "43b3d0d793c92367fd0e8d4557649869554a3cc9d4578f153ee89871330cbcac",
     "profiles/582010_monster_hunter_world.json": "44b8106f599426de679050be70d9002da7288ec9dd9bf44dcbf8677bc4b1e3d1",
     "profiles/schema.json": "094ddf11f461ba7b6eeb81a01bbcf54c4010ffeded732f148db226798457dcdc",
-    "shaders/stereo_reprojection.hlsl": "db179f45eb87ff23dfc0fd5d5e75c2e3cc1f538439af96d125db00338463b8c0",
+    "shaders/stereo_reprojection.hlsl": "09b4d5f193f04d4976d13e771be30e1139eea441c484d38dbcaabbc4abdbe442",
     "shaders/tonemap.hlsl": "a886e9369ac38e15171a03f6d55681897a2c2580e573fd5fa7d5552344a1cd5f",
     "shaders/stereo_resolve.hlsl": "b9787aa73933055a08e6ed372c7a83c0626462bb4a0f0bba9c734309b53b9dcf",
     "shaders/stereo_warp.hlsl": "0575ea5d393ac74782409acba603a8c687f271489935622de0392daa072a6c74",
@@ -89,5 +95,5 @@
     "shaders/asw_shader.hlsl": "ae77436c5869e5dcd5175bc0050f3e55f1f9abebd3aed49336867954fcee461c",
     "shaders/depth_reprojection.hlsl": "eb0e672fdaebaea0e1afa542990770b5d7d5044a18156f983623478c9e0541f5"
   },
-  "signature": "aa8f7a82f43e791ed78209e8b4c2b8130a0b325590b1aa4ba6693038b7ac23aac0e4ebf2cc7c759cc8df4c4a3559b11d9d8b3205de834910607353cd17f81d00"
+  "signature": "c7d11e105c42cd92df36197df3d764b0af2ad8401e214e0d7bc8fc22f4d9a085140dfec8ad59904b128a2ea877dbc7c0128923f150a5e8e936c12f9e65519803"
 }

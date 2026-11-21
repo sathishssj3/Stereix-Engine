@@ -12,21 +12,20 @@ export function GameDetail({ game, config, onConfigChange, logLines, onRemoveGam
   const apiColor = apiColors[game.api] || apiColors.Unknown;
 
   return (
-    <div className="settings-tab-enter" style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', paddingBottom: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', paddingBottom: 24 }}>
       {/* Hero Header with Red Full Border, Cool High-Tech Background & 3D Title */}
       <div 
-        className="settings-card settings-item-enter" 
+        className="settings-card" 
         style={{ 
           flexShrink: 0, 
           position: 'relative', 
           marginBottom: 26, 
           padding: '36px 40px', 
-          border: '1px solid #0e0e0eff',
+          border: '1px solid #141418',
           borderRadius: 10,
           background: 'linear-gradient(90deg, rgba(230, 20, 20, 0.45) 0%, rgba(190, 15, 15, 0.2) 42%, rgba(80, 5, 5, 0.06) 75%, transparent 100%), radial-gradient(ellipse at 85% 0%, rgba(255, 40, 40, 0.45) 0%, transparent 65%), linear-gradient(180deg, #1c0608 0%, #0c0406 45%, #07070A 100%)',
           boxShadow: 'none',
-          overflow: 'hidden',
-          animation: 'settingsOpenAnim 0.35s cubic-bezier(0.16, 1, 0.3, 1) both'
+          overflow: 'hidden'
         }}
       >
         {/* Title with Left Accent Pill Line (Solid White, Lower Thickness, Larger Size) */}
@@ -172,7 +171,7 @@ export function GameDetail({ game, config, onConfigChange, logLines, onRemoveGam
       </div>
       
       {/* Settings */}
-      <SettingsPanel config={config} onChange={onConfigChange} />
+      <SettingsPanel config={config} onChange={onConfigChange} game={game} />
       
       {/* Session Log */}
       <SessionLog logLines={logLines} />

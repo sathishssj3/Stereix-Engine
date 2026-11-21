@@ -84,6 +84,10 @@ bool StereoRenderer::RenderStereoFrame(ID3D11DeviceContext* context,
                                        ID3D11ShaderResourceView* gameColorSRV,
                                        ID3D11ShaderResourceView* gameDepthSRV,
                                        bool shouldAttemptStereo) {
+    if (state_ == StereoRendererState::UNINITIALIZED) {
+        state_ = StereoRendererState::READY;
+    }
+
     if (state_ != StereoRendererState::READY && state_ != StereoRendererState::RENDERING && state_ != StereoRendererState::ASW_ACTIVE) {
         return false;
     }
@@ -149,6 +153,7 @@ bool StereoRenderer::RenderStereoFrame(ID3D11DeviceContext* context,
     ID3D11SamplerState* nullSampler = nullptr;
     context->CSSetSamplers(0, 1, &nullSampler);
     
+    state_ = StereoRendererState::READY;
     return true;
 }
 

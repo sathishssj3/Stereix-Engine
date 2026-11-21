@@ -28,6 +28,9 @@ bool DX11GraphicsBackend::Initialize(void* nativeDevice, void* nativeContext) {
     m_context = static_cast<ID3D11DeviceContext*>(nativeContext);
     m_resourceManager = std::make_unique<StereoResourceManager>(m_device);
     m_stereoRenderer = std::make_unique<StereoRenderer>();
+    if (m_stereoRenderer) {
+        m_stereoRenderer->SetState(StereoRendererState::READY);
+    }
     if (m_device && m_context) {
         ImGuiDX11Integration::GetInstance().Initialize(m_device, m_context);
     }
@@ -40,6 +43,12 @@ void DX11GraphicsBackend::Shutdown() {
     m_resourceManager.reset();
     m_device = nullptr;
     m_context = nullptr;
+}
+
+void DX11GraphicsBackend::ReleaseResources() {
+    if (m_resourceManager) {
+        m_resourceManager->ReleaseResources();
+    }
 }
 
 void DX11GraphicsBackend::SetState(StereoRendererState state) {
@@ -143,10 +152,15 @@ void DX11GraphicsBackend::RenderStereo(
 
     // Bail rather than dispatch with nulls.
     if (!m_resourceManager->EnsureSourceViews(m_context, gameColorTex, gameDepthTex)) {
+        m_lastRenderOk = false;
         return;
     }
 
-    m_stereoRenderer->RenderStereoFrame(
+    if (m_stereoRenderer->GetState() == StereoRendererState::UNINITIALIZED) {
+        m_stereoRenderer->SetState(StereoRendererState::READY);
+    }
+
+    m_lastRenderOk = m_stereoRenderer->RenderStereoFrame(
         m_context,
         m_resourceManager.get(),
         frameCtx,
@@ -207,14 +221,16 @@ void DX11GraphicsBackend::SubmitStereoFrame(
 
             // Render stereo / monoscopic frame through compute pipeline to apply color linearization & alpha
             RenderStereo(currentSnapshot, camSnapshot, depthSnapshot, params, shouldAttemptStereo, uiMaskHandle);
-            leftSubmit = static_cast<ID3D11Texture2D*>(GetLeftEyeTexture());
-            rightSubmit = static_cast<ID3D11Texture2D*>(GetRightEyeTexture());
+            if (m_lastRenderOk) {
+                leftSubmit = static_cast<ID3D11Texture2D*>(GetLeftEyeTexture());
+                rightSubmit = static_cast<ID3D11Texture2D*>(GetRightEyeTexture());
+            }
 
-            // Monoscopic raw fallback: if compute shader produced nulls
-            // (heuristic failed, compute shader error, etc.), copy the game's
+            // Monoscopic raw fallback: if compute shader produced nulls or failed
+            // (heuristic failed, compute shader error, uninitialized state, etc.), copy the game's
             // raw backbuffer directly to both eyes. The player sees a flat 2D
             // view in the headset, but at least it's not black.
-            if (!leftSubmit || !rightSubmit) {
+            if (!leftSubmit || !rightSubmit || !m_lastRenderOk) {
                 auto* gameBackBuffer = static_cast<ID3D11Texture2D*>(currentSnapshot.backBuffer);
                 
                 // Last-resort: if backBuffer is null (lifecycle not ready), try
@@ -252,6 +268,36 @@ void DX11GraphicsBackend::SubmitStereoFrame(
                 ImGuiDX11Integration::GetInstance().Initialize(m_device, d3d11Context);
                 ImGuiDX11Integration::GetInstance().Render(m_device, d3d11Context, leftSubmit, rightSubmit);
             }
+
+            // Handle floating HUD quad submission if UI layer is detected
+            if (uiMaskHandle && oxrSwapchain && oxrSwapchain->GetHudSwapchain() != XR_NULL_HANDLE) {
+                uint32_t hudImageIndex = 0;
+                if (oxrSwapchain->AcquireHudImage(hudImageIndex)) {
+                    if (oxrSwapchain->WaitHudImage()) {
+                        ID3D11Texture2D* hudDest = oxrSwapchain->GetHudSwapchainImageD3D11(hudImageIndex);
+                        auto* d3d11Context = static_cast<ID3D11DeviceContext*>(currentSnapshot.nativeContext);
+                        if (hudDest && d3d11Context) {
+                            d3d11Context->CopyResource(hudDest, static_cast<ID3D11Resource*>(uiMaskHandle));
+                        }
+                        oxrSwapchain->ReleaseHudImage();
+                        oxrSubmitter->SetHudQuad(oxrSwapchain->GetHudSwapchain(), currentSnapshot.width, currentSnapshot.height);
+                    }
+                }
+            } else {
+                oxrSubmitter->ClearHudQuad();
+            }
+
+            bool isCinema = false;
+            float cinemaDist = 2.5f;
+            const auto* cfgMgr = SubsystemContext::Get().GetConfig();
+            if (cfgMgr) {
+                const auto& cfg = cfgMgr->GetConfig();
+                if (cfg.forceCinemaMode) isCinema = true;
+                if (cfg.theaterDistance >= 1.0f) cinemaDist = cfg.theaterDistance;
+            }
+            float submitW = (oxrSwapchain && oxrSwapchain->GetWidth() > 0) ? static_cast<float>(oxrSwapchain->GetWidth()) : static_cast<float>(currentSnapshot.width);
+            float submitH = (oxrSwapchain && oxrSwapchain->GetHeight() > 0) ? static_cast<float>(oxrSwapchain->GetHeight()) : static_cast<float>(currentSnapshot.height);
+            oxrSubmitter->SetCinemaQuad(isCinema, cinemaDist, submitW, submitH);
 
             oxrSubmitter->ReleaseAndEndDX11(
                 xrRuntime->GetSession(), xrRuntime->GetReferenceSpace(),

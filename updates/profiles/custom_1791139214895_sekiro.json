@@ -1,0 +1,22 @@
+{
+  "$schema": "./schema.json",
+  "id": "custom_1791139214895",
+  "name": "sekiro",
+  "engine": "Generic",
+  "api": "DX11",
+  "reverseZ": false,
+  "rowMajorMatrices": false,
+  "matrixPrecision": "Float32",
+  "motionAimSensitivity": 1,
+  "useRecommendedResolution": true,
+  "srgbCorrection": false,
+  "depthSubmission": true,
+  "rawInputMode": true,
+  "autoInjectOnLaunch": true,
+  "ipd": 0.064,
+  "convergence": 3.5,
+  "contrast": 1,
+  "saturation": 1,
+  "brightness": 1,
+  "aiNotes": "FromSoftware Dantelion: Configured Column-Major matrices, Standard-Z depth buffer, and 3.5m wide third-person action convergence."
+}

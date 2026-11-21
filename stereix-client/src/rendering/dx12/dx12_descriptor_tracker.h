@@ -19,6 +19,7 @@ struct DescriptorRecord {
     uint32_t arraySize;
     uint32_t mipLevels;
     uint64_t resourceGeneration; // Keep track of the resource epoch generation
+    bool isShaderReadable;       // True if resource can be bound as SRV (no DENY_SHADER_RESOURCE and typeless/float)
 };
 
 class Dx12DescriptorTracker {

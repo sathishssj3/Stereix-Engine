@@ -1,4 +1,4 @@
-# NexVR Engine — Agent Instructions
+# Stereix Engine — Agent Instructions
 
 Monorepo: a root CMake orchestrator builds the C++ engine from `nexvr-client/` (injection DLL + CLI + gtest suites); the Electron/React launcher lives in `nexvr-client/launcher/` (built separately); `nexvr-backend/` is a Node/TS cloud stack. Windows-only, MSVC x64.
 

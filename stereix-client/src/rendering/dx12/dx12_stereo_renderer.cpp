@@ -6,6 +6,16 @@
 
 namespace vrinject {
 
+static bool SafeGetResourceDesc(ID3D12Resource* res, D3D12_RESOURCE_DESC& outDesc) {
+    if (!res) return false;
+    __try {
+        outDesc = res->GetDesc();
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 DX12StereoRenderer::~DX12StereoRenderer() {
     Shutdown();
 }
@@ -17,22 +27,20 @@ bool DX12StereoRenderer::Initialize(ID3D12Device* device) {
         if (FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[i])))) {
             return false;
         }
+        if (FAILED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[i].Get(), nullptr, IID_PPV_ARGS(&m_commandLists[i])))) {
+            return false;
+        }
+        // Command list starts in recording state, close it immediately since we reset it per frame
+        m_commandLists[i]->Close();
     }
-
-    if (FAILED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_commandList)))) {
-        return false;
-    }
-
-    // Command list starts in recording state, close it immediately since we reset it per frame
-    m_commandList->Close();
 
     return true;
 }
 
 void DX12StereoRenderer::Shutdown() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_commandList.Reset();
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        m_commandLists[i].Reset();
         m_commandAllocators[i].Reset();
     }
 }
@@ -54,20 +62,18 @@ bool DX12StereoRenderer::RenderStereo(
 
     // Synchronization Contract (Single Queue Assertion)
     // The dispatch MUST submit to the game's queue to guarantee FIFO ordering
-    if (gameQueue != Dx12LifecycleManager::Get().GetMainQueue()) {
+    ID3D12CommandQueue* mainQueue = Dx12LifecycleManager::Get().GetMainQueue();
+    if (mainQueue && gameQueue == mainQueue) {
+        m_isDegraded = false;
+    } else if (mainQueue && gameQueue != mainQueue) {
         std::cerr << "CRITICAL ERROR: StereoRenderer dispatch queue does not match LifecycleManager MainQueue." << std::endl;
-        assert(false && "Single-Queue synchronization contract violated!");
         m_isDegraded = true;
-    }
-
-    if (m_isDegraded) {
-        return false; // Skip stereo rendering if degraded
     }
     
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    // Frame Sequence
-    uint32_t frameIndex = (cam.frame > 0 ? cam.frame : 0) % MAX_FRAMES_IN_FLIGHT;
+    // Frame Sequence: advance ring buffer monotonically across frames
+    uint32_t frameIndex = (m_currentFrameIndex++) % MAX_FRAMES_IN_FLIGHT;
 
     // Ensure the GPU has finished with this allocator before resetting it
     if (m_frameFences[frameIndex] != 0) {
@@ -75,32 +81,27 @@ bool DX12StereoRenderer::RenderStereo(
     }
     
     m_commandAllocators[frameIndex]->Reset();
-    m_commandList->Reset(m_commandAllocators[frameIndex].Get(), nullptr);
+    ID3D12GraphicsCommandList* cmdList = m_commandLists[frameIndex].Get();
+    cmdList->Reset(m_commandAllocators[frameIndex].Get(), nullptr);
 
-    bool isStereoValid = (cam.IsValid() && depth.IsValid() && cam.resourceIdentity.nativeHandle && depth.identity.nativeHandle);
-    
-    // Transition Resources (Inputs)
-    ID3D12Resource* leftEye = resourceManager->GetLeftEyeTexture();
-    ID3D12Resource* rightEye = resourceManager->GetRightEyeTexture();
-    
-    // Eye textures are created lazily on first HandleResize.
-    // If they don't exist yet, skip this frame cleanly.
-    if (!leftEye || !rightEye) {
-        m_commandList->Close();
-        return true; // Not an error — just not ready yet
-    }
-    
     ID3D12Resource* camTex = (cam.IsValid() && cam.resourceIdentity.nativeHandle) ? 
         reinterpret_cast<ID3D12Resource*>(cam.resourceIdentity.nativeHandle) : 
         Dx12LifecycleManager::Get().GetBackBuffer();
+    if (!camTex) {
+        camTex = Dx12LifecycleManager::Get().GetBackBuffer();
+    }
+
     ID3D12Resource* depthTex = (depth.IsValid() && depth.identity.nativeHandle) ? 
         reinterpret_cast<ID3D12Resource*>(depth.identity.nativeHandle) : 
         camTex;
     
     if (!camTex) {
-        m_commandList->Close();
+        cmdList->Close();
         return true;
     }
+
+    bool isBackBuffer = (camTex == Dx12LifecycleManager::Get().GetBackBuffer());
+    D3D12_RESOURCE_STATES camInitialState = isBackBuffer ? D3D12_RESOURCE_STATE_PRESENT : D3D12_RESOURCE_STATE_RENDER_TARGET;
 
     // Check PSO availability once, before recording any commands
     ID3D12Device* device = nullptr;
@@ -114,44 +115,81 @@ bool DX12StereoRenderer::RenderStereo(
         hasPso = (rootSig != nullptr && pso != nullptr);
         device->Release();
     }
-    
-    if (!hasPso) {
-        // No PSO yet — submit empty command list to keep fence cadence valid
-        m_commandList->Close();
-        ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+
+    ID3D12Resource* leftEye = resourceManager->GetLeftEyeTexture();
+    ID3D12Resource* rightEye = resourceManager->GetRightEyeTexture();
+
+    // Verify depth texture is legally accessible as a Shader Resource View in compute shaders
+    bool isDepthShaderReadable = false;
+    if (depthTex && depthTex != camTex) {
+        D3D12_RESOURCE_DESC dDesc = {};
+        if (SafeGetResourceDesc(depthTex, dDesc)) {
+            bool denyShader = (dDesc.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE) != 0;
+            bool isTypelessOrFloat = (
+                dDesc.Format == DXGI_FORMAT_R32G8X24_TYPELESS ||
+                dDesc.Format == DXGI_FORMAT_R32_TYPELESS ||
+                dDesc.Format == DXGI_FORMAT_R24G8_TYPELESS ||
+                dDesc.Format == DXGI_FORMAT_R16_TYPELESS ||
+                dDesc.Format == DXGI_FORMAT_R32_FLOAT ||
+                dDesc.Format == DXGI_FORMAT_R16_UNORM
+            );
+            isDepthShaderReadable = (!denyShader && isTypelessOrFloat);
+        }
+    }
+
+    bool isStereoValid = !m_isDegraded && shouldAttemptStereo && hasPso && leftEye && rightEye &&
+                         (cam.IsValid() && depth.IsValid() && cam.resourceIdentity.nativeHandle && depth.identity.nativeHandle) &&
+                         isDepthShaderReadable;
+
+    bool canRunShader = (hasPso && leftEye && rightEye && camTex);
+    if (!canRunShader) {
+        if (camTex && oxrLeftDest && oxrRightDest) {
+            stateTracker->ForceResourceState(camTex, camInitialState);
+            stateTracker->TransitionResource(camTex, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            stateTracker->ForceResourceState(oxrLeftDest, D3D12_RESOURCE_STATE_COMMON);
+            stateTracker->TransitionResource(oxrLeftDest, D3D12_RESOURCE_STATE_COPY_DEST);
+            stateTracker->ForceResourceState(oxrRightDest, D3D12_RESOURCE_STATE_COMMON);
+            stateTracker->TransitionResource(oxrRightDest, D3D12_RESOURCE_STATE_COPY_DEST);
+            stateTracker->FlushBarriers(cmdList);
+
+            cmdList->CopyResource(oxrLeftDest, camTex);
+            cmdList->CopyResource(oxrRightDest, camTex);
+
+            stateTracker->TransitionResource(camTex, camInitialState);
+            stateTracker->TransitionResource(oxrLeftDest, D3D12_RESOURCE_STATE_COMMON);
+            stateTracker->TransitionResource(oxrRightDest, D3D12_RESOURCE_STATE_COMMON);
+            stateTracker->FlushBarriers(cmdList);
+        }
+        cmdList->Close();
+        ID3D12CommandList* ppCommandLists[] = { cmdList };
         gameQueue->ExecuteCommandLists(1, ppCommandLists);
         m_frameFences[frameIndex] = fenceManager->Signal(gameQueue);
-        return true;
-    }
-    
-    // Full render path: barriers → bind → dispatch → barriers → execute
-    bool isBackBuffer = (camTex == Dx12LifecycleManager::Get().GetBackBuffer());
-    D3D12_RESOURCE_STATES camInitialState = isBackBuffer ? D3D12_RESOURCE_STATE_PRESENT : D3D12_RESOURCE_STATE_RENDER_TARGET;
-    
-    stateTracker->ForceResourceState(camTex, camInitialState);
-    if (depthTex != camTex) {
-        stateTracker->ForceResourceState(depthTex, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+        return false;
     }
 
+    stateTracker->ForceResourceState(camTex, camInitialState);
     stateTracker->TransitionResource(camTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    if (depthTex != camTex) {
+
+    if (isStereoValid && depthTex && depthTex != camTex) {
+        stateTracker->ForceResourceState(depthTex, D3D12_RESOURCE_STATE_DEPTH_WRITE);
         stateTracker->TransitionResource(depthTex, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
+
     stateTracker->TransitionResource(leftEye, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     stateTracker->TransitionResource(rightEye, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    stateTracker->FlushBarriers(m_commandList.Get());
+    stateTracker->FlushBarriers(cmdList);
 
     // Bind Descriptor Heaps
-    resourceManager->BindDescriptorHeaps(m_commandList.Get());
+    resourceManager->BindDescriptorHeaps(cmdList);
 
     // Bind Root Signature & Pipeline State
-    m_commandList->SetComputeRootSignature(rootSig);
-    m_commandList->SetPipelineState(pso);
+    cmdList->SetComputeRootSignature(rootSig);
+    cmdList->SetPipelineState(pso);
 
     // Bind Constants & Resources
-    m_commandList->SetComputeRootDescriptorTable(0, resourceManager->GetCbvGpuHandle());
-    m_commandList->SetComputeRootDescriptorTable(1, resourceManager->GetSrvGpuHandle());
-    m_commandList->SetComputeRootDescriptorTable(2, resourceManager->GetUavGpuHandle());
+    cmdList->SetComputeRootDescriptorTable(0, resourceManager->GetCbvGpuHandle());
+    cmdList->SetComputeRootDescriptorTable(1, resourceManager->GetSrvGpuHandle());
+    cmdList->SetComputeRootDescriptorTable(2, resourceManager->GetUavGpuHandle());
 
     // Dispatch Compute (8x8 thread groups over eye dimensions)
     UINT eyeW = resourceManager->GetWidth();
@@ -160,7 +198,7 @@ bool DX12StereoRenderer::RenderStereo(
     if (eyeH == 0) eyeH = 1080;
     UINT dispatchX = (eyeW + 7) / 8;
     UINT dispatchY = (eyeH + 7) / 8;
-    m_commandList->Dispatch(dispatchX, dispatchY, 1);
+    cmdList->Dispatch(dispatchX, dispatchY, 1);
 
     // UAV Barrier to ensure compute writes are visible before copy to swapchain
     D3D12_RESOURCE_BARRIER uavBarriers[2] = {};
@@ -168,13 +206,13 @@ bool DX12StereoRenderer::RenderStereo(
     uavBarriers[0].UAV.pResource = leftEye;
     uavBarriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
     uavBarriers[1].UAV.pResource = rightEye;
-    m_commandList->ResourceBarrier(2, uavBarriers);
+    cmdList->ResourceBarrier(2, uavBarriers);
 
     // If in-headset menu is active, draw it directly onto eye buffers in the same command list
     if (OverlayManager::GetInstance().IsOverlayVisible()) {
         DXGI_FORMAT rtvFmt = leftEye->GetDesc().Format;
         ImGuiDX12Integration::GetInstance().Initialize(device, rtvFmt);
-        ImGuiDX12Integration::GetInstance().Render(device, m_commandList.Get(), leftEye, rightEye);
+        ImGuiDX12Integration::GetInstance().Render(device, cmdList, leftEye, rightEye);
     }
 
     // Transition Outputs for OpenXR Copy Source
@@ -190,14 +228,14 @@ bool DX12StereoRenderer::RenderStereo(
         stateTracker->ForceResourceState(oxrRightDest, D3D12_RESOURCE_STATE_COMMON);
         stateTracker->TransitionResource(oxrRightDest, D3D12_RESOURCE_STATE_COPY_DEST);
     }
-    stateTracker->FlushBarriers(m_commandList.Get());
+    stateTracker->FlushBarriers(cmdList);
 
     // Copy to OpenXR Swapchain (exact dimensions match eye textures)
     if (oxrLeftDest) {
-        m_commandList->CopyResource(oxrLeftDest, leftEye);
+        cmdList->CopyResource(oxrLeftDest, leftEye);
     }
     if (oxrRightDest) {
-        m_commandList->CopyResource(oxrRightDest, rightEye);
+        cmdList->CopyResource(oxrRightDest, rightEye);
     }
 
     // Transition OpenXR swapchain images back to COMMON for OpenXR presentation
@@ -208,16 +246,18 @@ bool DX12StereoRenderer::RenderStereo(
         stateTracker->TransitionResource(oxrRightDest, D3D12_RESOURCE_STATE_COMMON);
     }
     
-    // Transition game inputs back to standard states so the engine's next frame does not encounter barrier conflicts
+    // Transition game inputs back to standard states so the engine's next frame does not encounter barrier conflicts.
+    // The game's depth buffer must be strictly restored to DEPTH_WRITE so that subsequent frame depth writes
+    // (such as terrain Z-prepass, G-buffer, and cascaded shadow maps) do not fail or corrupt depth metadata.
     stateTracker->TransitionResource(camTex, camInitialState);
-    if (depthTex != camTex) {
-        stateTracker->TransitionResource(depthTex, D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    if (isStereoValid && depthTex && depthTex != camTex) {
+        stateTracker->TransitionResource(depthTex, D3D12_RESOURCE_STATE_DEPTH_WRITE);
     }
-    stateTracker->FlushBarriers(m_commandList.Get());
+    stateTracker->FlushBarriers(cmdList);
 
     // Execute Command List
-    m_commandList->Close();
-    ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+    cmdList->Close();
+    ID3D12CommandList* ppCommandLists[] = { cmdList };
     gameQueue->ExecuteCommandLists(1, ppCommandLists);
 
     // Signal Fence (GPU Lifetime tracking)

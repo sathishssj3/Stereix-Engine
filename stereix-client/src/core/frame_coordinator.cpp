@@ -3,9 +3,7 @@
 #include <vector>
 #include "rendering/dx11/dx11_graphics_backend.h"
 #include "rendering/dx12/dx12_graphics_backend.h"
-#include "rendering/stereo/stereo_pipeline.h"
 #include "rendering/vulkan/vulkan_graphics_backend.h"
-#include "rendering/vulkan_resource_state_tracker.h"
 #include "rendering/dx11/dx11_resource_validator.h"
 #include "core/logger.h"
 
@@ -17,18 +15,12 @@
 #include "heuristics/camera_validator.h"
 #include "heuristics/candidate_collector.h"
 #include "heuristics/depth_candidate_collector.h"
-#include "heuristics/depth_delta_tracker.h"
 #include "heuristics/depth_lock_manager.h"
 #include "core/diagnostic_context.h"
 #include "core/subsystem_context.h"
 #include "core/engine_detector.h"
 #include "hooks/input_hook.h"
-
-
-#include "rendering/stereo/stereo_camera_generator.h"
-#include "rendering/stereo/stereo_frame_builder.h"
 #include "core/overlay_manager.h"
-#include "hooks/input_hook.h"
 #include <windows.h>
 
 #include "ai/backend/dx11_ai_backend.h"
@@ -52,7 +44,6 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
 
   m_stateMonitor.BeginFrame(m_globalFrameCounter);
 
-  // DX11-specific profiling and validation - skip for DX12/Vulkan
   if (m_currentSnapshot.backend == GraphicsBackend::DX11) {
     m_gpuProfiler.BeginFrame(
         static_cast<ID3D11DeviceContext *>(m_currentSnapshot.nativeContext),
@@ -68,7 +59,6 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
       return;
     }
   } else if (m_currentSnapshot.backend == GraphicsBackend::DX12) {
-    // DX12 path: skip DX11 validation, accept the snapshot as valid
     m_stateMonitor.UpdateDx11Health(true);
   } else if (m_currentSnapshot.backend == GraphicsBackend::Vulkan) {
     m_stateMonitor.UpdateDx11Health(true);
@@ -123,13 +113,24 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
   }
   s_lastKeyboardToggle = keyboardPressed;
 
+  // Keyboard shortcut for Virtual Cinema Screen Recentering (F12 or Ctrl+Alt+R)
+  static bool s_lastRecenterToggle = false;
+  bool recenterPressed = ((GetAsyncKeyState(VK_F12) & 0x8000) != 0) ||
+                         (((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) &&
+                          ((GetAsyncKeyState(VK_MENU) & 0x8000) != 0) &&
+                          ((GetAsyncKeyState('R') & 0x8000) != 0));
+  if (recenterPressed && !s_lastRecenterToggle) {
+      RequestCinemaRecenter();
+      LOG_INFO("FrameCoordinator: Virtual Cinema Screen recentered in front of headset gaze.");
+  }
+  s_lastRecenterToggle = recenterPressed;
+
   // Camera and depth discovery - wrapped in try-catch because these subsystems
   // may crash on DX12 backends (they were designed for DX11). A crash here must
   // NOT prevent OpenXR initialization.
   CameraSnapshot camSnapshot;
   DepthSnapshot depthSnapshot;
   try {
-    // 1. Collect candidates
     std::vector<CameraCandidate> candidates;
     {
       ScopedCpuTimer camTimer(&m_cpuProfiler, CpuSegment::CameraDiscovery);
@@ -199,7 +200,6 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
           bestCandidate.reversedZ = reverseZ;
           bestCandidate.isLeftHanded = (dynamicProjMatrix.m[2][3] > 0.0f);
 
-          // Compute ViewProjection = View * Proj
           Matrix4x4 vp = {};
           for (int r = 0; r < 4; ++r) {
               for (int c = 0; c < 4; ++c) {
@@ -233,6 +233,19 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
 
       camSnapshot = SubsystemContext::Get().GetCameraLockManager()->GetSnapshot();
       m_stateMonitor.UpdateCameraHealth(camSnapshot.IsValid());
+
+      // Notify PageScanner of camera lock state transitions to control adaptive sleep.
+      // This drives the scanner to 0 MB/s memory bandwidth when tracking is stable.
+      {
+        auto lockState = SubsystemContext::Get().GetCameraLockManager()->GetState();
+        bool isLockedNow = (lockState == CameraLockState::LOCKED);
+        if (isLockedNow && !m_prevCameraLocked) {
+          SubsystemContext::Get().GetPageScanner()->NotifyCameraLocked();
+        } else if (!isLockedNow && m_prevCameraLocked) {
+          SubsystemContext::Get().GetPageScanner()->NotifyCameraLost();
+        }
+        m_prevCameraLocked = isLockedNow;
+      }
     }
 
     // ==============================================
@@ -241,22 +254,12 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
     {
       ScopedCpuTimer depthTimer(&m_cpuProfiler, CpuSegment::DepthDiscovery);
 
-      if (m_currentSnapshot.backend == GraphicsBackend::DX11) {
-        SubsystemContext::Get().GetDepthCandidateCollector()->OnFrameEnd(m_globalFrameCounter);
-        SubsystemContext::Get().GetDepthLockManager()->OnFrameEnd(
-            m_globalFrameCounter,
-            (uint32_t)Dx11LifecycleManager::Get().GetEpoch().deviceGeneration,
-            (uint32_t)Dx11LifecycleManager::Get().GetEpoch().swapchainGeneration,
-            m_currentSnapshot.width, m_currentSnapshot.height);
-      } else {
-        // DX12/Vulkan: skip DX11 depth discovery for now
-        SubsystemContext::Get().GetDepthCandidateCollector()->OnFrameEnd(m_globalFrameCounter);
-        SubsystemContext::Get().GetDepthLockManager()->OnFrameEnd(
-            m_globalFrameCounter,
-            (uint32_t)m_currentSnapshot.epoch.deviceGeneration,
-            (uint32_t)m_currentSnapshot.epoch.swapchainGeneration,
-            m_currentSnapshot.width, m_currentSnapshot.height);
-      }
+      SubsystemContext::Get().GetDepthCandidateCollector()->OnFrameEnd(m_globalFrameCounter);
+      SubsystemContext::Get().GetDepthLockManager()->OnFrameEnd(
+          m_globalFrameCounter,
+          static_cast<uint32_t>(m_currentSnapshot.epoch.deviceGeneration),
+          static_cast<uint32_t>(m_currentSnapshot.epoch.swapchainGeneration),
+          m_currentSnapshot.width, m_currentSnapshot.height);
 
       depthSnapshot = SubsystemContext::Get().GetDepthLockManager()->GetSnapshot();
       m_stateMonitor.UpdateDepthHealth(depthSnapshot.IsValid());
@@ -274,7 +277,6 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
   // ==============================================
   LOG_DEBUG("FrameCoordinator: Entering stereo pipeline (frame %llu).", m_globalFrameCounter);
 
-  // Lazy init managers
   if (!m_graphicsBackend) {
     if (m_currentSnapshot.backend == GraphicsBackend::DX11) {
       m_graphicsBackend = std::make_unique<DX11GraphicsBackend>();
@@ -289,17 +291,20 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
       LOG_ERROR("FrameCoordinator: Unsupported graphics backend.");
       return;
     }
-    m_graphicsBackend->Initialize(m_currentSnapshot.nativeDevice,
-                                  m_currentSnapshot.nativeContext);
-    LOG_INFO("FrameCoordinator: Graphics backend initialized (device=%p, context=%p).",
-             m_currentSnapshot.nativeDevice, m_currentSnapshot.nativeContext);
-    if (m_currentSnapshot.backend == GraphicsBackend::DX11) {
-      m_gpuProfiler.Initialize(
-          static_cast<ID3D11Device *>(m_currentSnapshot.nativeDevice));
+  }
+
+  if (m_graphicsBackend && !m_graphicsBackend->Healthy() && m_currentSnapshot.nativeDevice) {
+    if (m_graphicsBackend->Initialize(m_currentSnapshot.nativeDevice,
+                                      m_currentSnapshot.nativeContext)) {
+      LOG_INFO("FrameCoordinator: Graphics backend initialized successfully (device=%p, context=%p).",
+               m_currentSnapshot.nativeDevice, m_currentSnapshot.nativeContext);
+      if (m_currentSnapshot.backend == GraphicsBackend::DX11) {
+        m_gpuProfiler.Initialize(
+            static_cast<ID3D11Device *>(m_currentSnapshot.nativeDevice));
+      }
     }
   }
 
-  // Initialize AI Scheduler
   if (!m_aiScheduler) {
     std::unique_ptr<ai::IAIBackend> aiBackend;
     if (m_currentSnapshot.backend == GraphicsBackend::DX11) {
@@ -357,7 +362,6 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
   }
 
   if (m_oxrRuntime) {
-    // Pump OpenXR events
     m_oxrRuntime->PollEvents();
 
     if (m_oxrRuntime->GetState() == openxr::RuntimeState::SYSTEM_SELECTED) {
@@ -392,116 +396,21 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
     // Phase 9: Update virtual gamepad input from VR controllers
     m_inputManager.Update(m_oxrRuntime->GetSession());
 
-    m_graphicsBackend->SetState(StereoRendererState::READY);
-
-    if (m_graphicsBackend->GetState() == StereoRendererState::READY) {
+    if (m_graphicsBackend && (m_graphicsBackend->Healthy() || m_graphicsBackend->GetState() == StereoRendererState::DEGRADED)) {
 
       // ==============================================
       // OPENXR FRAME SUBMISSION & RENDER
       // ==============================================
+      if (m_oxrSwapchain && m_currentSnapshot.width > 0 && m_currentSnapshot.height > 0 &&
+          (m_oxrSwapchain->GetWidth() != m_currentSnapshot.width || m_oxrSwapchain->GetHeight() != m_currentSnapshot.height)) {
+          LOG_INFO("FrameCoordinator: Viewport resized from %ux%u to %ux%u. Recreating OpenXR swapchain.",
+                   m_oxrSwapchain->GetWidth(), m_oxrSwapchain->GetHeight(), m_currentSnapshot.width, m_currentSnapshot.height);
+          m_oxrSwapchain.reset();
+      }
+
       if (!m_oxrSwapchain) {
-        int64_t targetFormat = 28; // DXGI_FORMAT_R8G8B8A8_UNORM (default for DX11/DX12)
-        if (m_currentSnapshot.backend == GraphicsBackend::Vulkan) {
-            // Enumerate formats the OpenXR runtime supports and pick
-            // the best match for raw byte copy (vkCmdCopyImage).
-            targetFormat = 43; // fallback: VK_FORMAT_R8G8B8A8_SRGB
-            uint32_t fmtCount = 0;
-            if (XR_SUCCEEDED(xrEnumerateSwapchainFormats(m_oxrRuntime->GetSession(), 0, &fmtCount, nullptr)) && fmtCount > 0) {
-                std::vector<int64_t> fmts(fmtCount);
-                xrEnumerateSwapchainFormats(m_oxrRuntime->GetSession(), fmtCount, &fmtCount, fmts.data());
-                LOG_DEBUG("FrameCoordinator: OpenXR runtime supports %u swapchain formats:", fmtCount);
-                for (uint32_t i = 0; i < fmtCount; i++) {
-                    LOG_DEBUG("  format[%u] = %lld", i, fmts[i]);
-                }
-                // Pick format matching game's channel order for vkCmdCopyImage.
-                // Pick format matching game's channel order for vkCmdCopyImage.
-                // Prefer the game's own format family (UNORM first, then SRGB).
-                int64_t gameFormat = m_currentSnapshot.format;
-                // Build preference list dynamically based on game format
-                std::vector<int64_t> preferred;
-                if (gameFormat == 44 || gameFormat == 50) {
-                    // Game uses B8G8R8A8 family
-                    preferred = {44, 50, 37, 43}; // B8G8R8A8_UNORM, B8G8R8A8_SRGB, R8G8B8A8_UNORM, R8G8B8A8_SRGB
-                } else {
-                    // Game uses R8G8B8A8 family (most common)
-                    preferred = {37, 43, 44, 50}; // R8G8B8A8_UNORM, R8G8B8A8_SRGB, B8G8R8A8_UNORM, B8G8R8A8_SRGB
-                }
-                for (int64_t pref : preferred) {
-                    for (int64_t supported : fmts) {
-                        if (supported == pref) {
-                            targetFormat = pref;
-                            goto format_found;
-                        }
-                    }
-                }
-                format_found:;
-            }
-        } else {
-            // DX11/DX12: Enumerate OpenXR-supported DXGI formats.
-            // ALWAYS try the game's own format first for bit-perfect CopyResource.
-            // CopyResource requires identical formats or it will fail silently.
-            uint32_t fmtCount = 0;
-            if (XR_SUCCEEDED(xrEnumerateSwapchainFormats(m_oxrRuntime->GetSession(), 0, &fmtCount, nullptr)) && fmtCount > 0) {
-                std::vector<int64_t> fmts(fmtCount);
-                xrEnumerateSwapchainFormats(m_oxrRuntime->GetSession(), fmtCount, &fmtCount, fmts.data());
-                LOG_DEBUG("FrameCoordinator: OpenXR runtime supports %u DXGI swapchain formats:", fmtCount);
-                for (uint32_t i = 0; i < fmtCount; i++) {
-                    LOG_DEBUG("  dxgi_format[%u] = %lld", i, fmts[i]);
-                }
-                
-                // Fallback priority list (sRGB > UNORM > Float)
-                // 29 = R8G8B8A8_UNORM_SRGB, 91 = B8G8R8A8_UNORM_SRGB
-                // 28 = R8G8B8A8_UNORM, 87 = B8G8R8A8_UNORM, 24 = R10G10B10A2_UNORM, 10 = R16G16B16A16_FLOAT
-                const int64_t dxgiPreferred[] = {29, 91, 28, 87, 24, 10, 2};
-
-                int64_t gameFormat = static_cast<int64_t>(m_currentSnapshot.format);
-                
-                // Color space & format family management:
-                // CopyResource requires textures to belong to the exact same DXGI format family.
-                // For R8G8B8A8 family (28, 29): prefer 28, fallback 29.
-                // For B8G8R8A8 family (87, 91): prefer 87, fallback 91.
-                // For R10G10B10A2 family (24): must use 24.
-                // For R16G16B16A16_FLOAT family (10): must use 10.
-                std::vector<int64_t> familyPreference;
-                if (gameFormat == 28) {
-                    familyPreference = {28, 29};
-                } else if (gameFormat == 29) {
-                    familyPreference = {29, 28};
-                } else if (gameFormat == 87) {
-                    familyPreference = {87, 91};
-                } else if (gameFormat == 91) {
-                    familyPreference = {91, 87};
-                } else if (gameFormat == 24) {
-                    familyPreference = {24};
-                } else if (gameFormat == 10) {
-                    familyPreference = {10};
-                } else {
-                    familyPreference = {gameFormat};
-                }
-
-                // Step 1: Try format from the game's format family first
-                for (int64_t pref : familyPreference) {
-                    for (int64_t supported : fmts) {
-                        if (supported == pref) {
-                            targetFormat = pref;
-                            LOG_DEBUG("FrameCoordinator: Selected format %lld matching game family (game format %lld)", pref, gameFormat);
-                            goto dxgi_format_found;
-                        }
-                    }
-                }
-                
-                // Step 2: Global fallback priority list (sRGB > UNORM > Float)
-                for (int64_t pref : dxgiPreferred) {
-                    for (int64_t supported : fmts) {
-                        if (supported == pref) {
-                            targetFormat = pref;
-                            goto dxgi_format_found;
-                        }
-                    }
-                }
-                dxgi_format_found:;
-            }
-        }
+        int64_t targetFormat = openxr::OpenXRSwapchainManager::SelectOptimalFormat(
+            m_oxrRuntime->GetSession(), m_currentSnapshot.backend, m_currentSnapshot.format);
         LOG_INFO("[OK] Stereo Pipeline: Dual-Eye Swapchain Created (%ux%u, Format: %lld)",
                  m_currentSnapshot.width, m_currentSnapshot.height, targetFormat);
         m_oxrSwapchain = std::make_unique<openxr::OpenXRSwapchainManager>(
@@ -510,7 +419,7 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
             m_oxrRuntime->GetSession(), targetFormat, m_currentSnapshot.width,
             m_currentSnapshot.height, m_currentSnapshot.backend)) {
             LOG_ERROR("FrameCoordinator: OpenXR swapchain creation FAILED with format %lld!", targetFormat);
-            m_oxrSwapchain.reset(); // Allow retry next frame
+            m_oxrSwapchain.reset();
         }
       }
       if (!m_oxrSubmitter) {
@@ -518,9 +427,14 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
             m_oxrHealthMonitor.get());
       }
 
-      // 2. Pure Math: Generate Eye Matrices
       StereoParams params;
       params.convergence = 0.5f;
+      const auto* cfgMgr = SubsystemContext::Get().GetConfig();
+      if (cfgMgr) {
+          const auto& c = cfgMgr->GetConfig();
+          if (c.ipd > 0.0f) params.ipd = c.ipd;
+          if (c.convergence > 0.0f) params.convergence = c.convergence;
+      }
 
       if (m_aiScheduler) {
           ai::AIJob aiJob;
@@ -547,7 +461,6 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
           m_aiScheduler ? m_aiScheduler->GetLatestUIMask() : nullptr
       );
 
-      // Cache the headset pose for the next frame's injection
       m_cachedHeadsetPose = m_currentSnapshot.leftPose;
 
       m_stateMonitor.UpdateOpenXrHealth(true);
@@ -556,7 +469,9 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
       m_stateMonitor.UpdateOpenXrHealth(false);
     }
   } else {
-    m_graphicsBackend->SetState(StereoRendererState::DEGRADED);
+    if (m_graphicsBackend && m_graphicsBackend->Healthy()) {
+      m_graphicsBackend->SetState(StereoRendererState::DEGRADED);
+    }
     m_stateMonitor.UpdateStereoHealth(false);
     m_stateMonitor.UpdateOpenXrHealth(false);
   }
@@ -566,7 +481,6 @@ void FrameCoordinator::OnPresentEnd() {
   if (!m_frameActive)
     return;
 
-  // Resolve GPU queries and dashboard (DX11 only)
   if (m_graphicsBackend && m_currentSnapshot.backend == GraphicsBackend::DX11) {
     m_gpuProfiler.EndFrame(
         static_cast<ID3D11DeviceContext *>(m_currentSnapshot.nativeContext));
@@ -575,7 +489,6 @@ void FrameCoordinator::OnPresentEnd() {
   auto report = m_stateMonitor.EvaluateHealth();
   m_dashboard.Update(report, m_cpuProfiler, m_gpuProfiler);
 
-  // Optional: Print to console every 1 second
   m_dashboard.PrintToConsole();
 
   m_frameActive = false;

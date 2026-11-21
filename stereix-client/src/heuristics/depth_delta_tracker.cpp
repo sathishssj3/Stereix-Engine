@@ -6,15 +6,15 @@ namespace vrinject {
 void DepthDeltaTracker::Track(DepthCandidate& candidate, uint64_t currentFrame) {
     if (!candidate.valid) return;
 
-    // 1. Initial heuristic (duration tracking)
     uint64_t lifetime = currentFrame - candidate.identity.epoch.resourceGeneration; // Approximated with frames since creation
     candidate.lifetimeScore = std::min(1.0f, static_cast<float>(lifetime) / 60.0f);
     
     // Temporal stability (how recently was it seen?)
     if (candidate.lastFrameSeen > 0) {
         uint64_t framesSinceSeen = currentFrame - candidate.frameSeen;
-        if (framesSinceSeen > 10) {
+        if (framesSinceSeen > 5) {
             candidate.temporalStabilityScore = 0.0f; // Stale
+            candidate.valid = false; // Destroyed or inactive depth buffer - disqualify from selection
         } else {
             candidate.temporalStabilityScore = 1.0f - (static_cast<float>(framesSinceSeen) / 10.0f);
         }

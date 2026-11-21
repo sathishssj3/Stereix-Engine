@@ -85,6 +85,8 @@ void PageScanner::StartDynamicScan(float targetFov) {
 void PageScanner::StopDynamicScan() {
     if (m_scanRunning) {
         m_scanRunning = false;
+        // Wake the scanner thread in case it's blocked on the condition variable
+        m_wakeCv.notify_all();
         if (m_scanThread.joinable()) {
             m_scanThread.join();
         }
@@ -217,14 +219,80 @@ bool PageScanner::IsValidViewMatrixDouble(const double* mat) {
     return true;
 }
 
+void PageScanner::NotifyCameraLocked() {
+    m_cameraLocked.store(true, std::memory_order_release);
+    LOG_INFO("PageScanner: Camera lock notification received. Scanner entering deep sleep.");
+}
+
+void PageScanner::NotifyCameraLost() {
+    bool wasLocked = m_cameraLocked.exchange(false, std::memory_order_acq_rel);
+    if (wasLocked) {
+        LOG_INFO("PageScanner: Camera tracking lost. Waking scanner for revalidation.");
+        m_wakeCv.notify_one();
+    }
+}
+
+bool PageScanner::IsCameraLocked() const {
+    // Fast path: check the atomic flag set by FrameCoordinator
+    if (m_cameraLocked.load(std::memory_order_acquire)) {
+        return true;
+    }
+    // Slow path: query the CameraLockManager state machine directly
+    auto* cameraLockMgr = SubsystemContext::Get().GetCameraLockManager();
+    if (cameraLockMgr) {
+        auto state = cameraLockMgr->GetState();
+        if (state == CameraLockState::LOCKED || state == CameraLockState::RELOCKING) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void PageScanner::ScanDynamicHeaps() {
-    auto lastSweepTime = std::chrono::high_resolution_clock::now();
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+
+    // Maximum number of full sweeps before the scanner retires permanently.
+    // After 3 complete sweeps (or 1 sweep + camera lock), there's no value in
+    // continuing — CameraDeltaTracker reads the locked pointer directly each frame.
+    constexpr uint32_t MAX_SWEEPS_BEFORE_RETIRE = 3;
+    // Maximum wall-clock time for a single sweep before aborting mid-sweep.
+    // Prevents the 37-second sweep that caused Onimusha lag.
+    constexpr int64_t MAX_SWEEP_MS = 8000;
 
     while (m_scanRunning) {
+        // ── Adaptive Sleep Gate ─────────────────────────────────────────────
+        // If camera is already locked, enter deep sleep (0 MB/s bus traffic,
+        // 0% CPU). We block on a condition variable instead of polling.
+        if (IsCameraLocked()) {
+            LOG_INFO("PageScanner: Camera locked. Entering deep sleep (0 MB/s memory bandwidth).");
+            {
+                std::unique_lock<std::mutex> lk(m_sleepMutex);
+                // Sleep indefinitely until camera tracking is lost or scan is stopped.
+                // Re-check every 30 seconds as a safety net in case notification was missed.
+                m_wakeCv.wait_for(lk, std::chrono::seconds(30), [this] {
+                    return !m_scanRunning || !m_cameraLocked.load(std::memory_order_acquire);
+                });
+            }
+            if (!m_scanRunning) break;
+            // If we woke but camera is still locked (30s safety timeout), loop back to sleep.
+            if (IsCameraLocked()) continue;
+            LOG_INFO("PageScanner: Woke from deep sleep — camera tracking lost, starting revalidation sweep.");
+        }
+
+        // ── Retirement Check ────────────────────────────────────────────────
+        // After enough sweeps, the scanner has done its job. CameraDeltaTracker
+        // reads the locked pointer directly; continued scanning is pure waste.
+        uint32_t sweepCount = m_completedSweeps.load(std::memory_order_acquire);
+        if (sweepCount >= MAX_SWEEPS_BEFORE_RETIRE) {
+            LOG_INFO("PageScanner: %u sweeps completed. Retiring permanently to prevent memory bus contention.", sweepCount);
+            break;
+        }
+
         auto sweepStart = std::chrono::high_resolution_clock::now();
         size_t bytesScanned = 0;
         int viewCandidates = 0;
         int projCandidates = 0;
+        bool abortedEarly = false;
 
         MEMORY_BASIC_INFORMATION mbi;
         uint8_t* currentAddress = nullptr;
@@ -235,6 +303,23 @@ void PageScanner::ScanDynamicHeaps() {
 
         while (m_scanRunning && newDynamicCandidates.size() < MAX_CANDIDATES_PER_SWEEP) {
             if (VirtualQuery(currentAddress, &mbi, sizeof(mbi)) == 0) break;
+
+            // ── Mid-Sweep Abort Checks ──────────────────────────────────────
+            // Check every memory region (not just at loop top) so we abort
+            // within milliseconds of a lock event, not after 37 seconds.
+            if (IsCameraLocked()) {
+                LOG_INFO("PageScanner: Camera locked mid-sweep. Aborting sweep to stop memory bus contention.");
+                abortedEarly = true;
+                break;
+            }
+            auto now = std::chrono::high_resolution_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - sweepStart).count();
+            if (elapsed > MAX_SWEEP_MS) {
+                LOG_INFO("PageScanner: Sweep time budget exceeded (%lld ms > %lld ms). Aborting to prevent lag.",
+                         elapsed, MAX_SWEEP_MS);
+                abortedEarly = true;
+                break;
+            }
 
             bool isGuarded = (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0;
             bool isReadable = (mbi.Protect & (PAGE_READWRITE | PAGE_READONLY | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) != 0;
@@ -295,7 +380,7 @@ void PageScanner::ScanDynamicHeaps() {
             }
             
             currentAddress = static_cast<uint8_t*>(mbi.BaseAddress) + mbi.RegionSize;
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            std::this_thread::yield();
         }
 
         if (m_scanRunning) {
@@ -332,10 +417,17 @@ void PageScanner::ScanDynamicHeaps() {
         auto sweepEnd = std::chrono::high_resolution_clock::now();
         auto msTaken = std::chrono::duration_cast<std::chrono::milliseconds>(sweepEnd - sweepStart).count();
         
-        LOG_INFO("PageScanner: Sweep complete. Scanned %zu MB in %lld ms. Found %d View, %d Projection candidates.", 
+        LOG_INFO("PageScanner: Sweep %s. Scanned %zu MB in %lld ms. Found %d View, %d Projection candidates.",
+                 abortedEarly ? "aborted (camera locked or time budget exceeded)" : "complete",
                  bytesScanned / (1024 * 1024), msTaken, viewCandidates, projCandidates);
 
-        for (int i = 0; i < 40 && m_scanRunning; ++i) {
+        if (!abortedEarly) {
+            m_completedSweeps.fetch_add(1, std::memory_order_release);
+        }
+
+        // Inter-sweep cooldown: 8 seconds between sweeps, but interruptible
+        // by camera lock (enters deep sleep above) or shutdown.
+        for (int i = 0; i < 80 && m_scanRunning && !IsCameraLocked(); ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }

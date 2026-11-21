@@ -67,6 +67,9 @@ void CameraDeltaTracker::PollAndTrackCandidates() {
     // Pull candidates from PageScanner
     auto dynamicCands = SubsystemContext::Get().GetPageScanner()->GetDynamicCandidates();
     for (const auto& dc : dynamicCands) {
+        if (m_candidates.size() >= 64) {
+            break; // Cap candidate map to avoid unbounded memory scanning overhead
+        }
         if (m_candidates.find(dc.address) == m_candidates.end()) {
             DynamicCandidate c;
             c.staticPointer = dc.address;
@@ -95,6 +98,27 @@ void CameraDeltaTracker::PollAndTrackCandidates() {
 
     // Combined input motion energy
     float inputMotionEnergy = (mouseDelta * 0.1f) + (stickDelta * 8.0f) + (hmdAngularDelta * 1.5f);
+
+    bool lockedStillValid = false;
+    if (m_lockedPointer) {
+        auto it = m_candidates.find(m_lockedPointer);
+        if (it != m_candidates.end()) {
+            Matrix4x4 lockedMat;
+            if (SafeReadMatrix(m_lockedPointer, it->second.isDoublePrecision, lockedMat)) {
+                if (PageScanner::IsValidViewMatrixFloat(&lockedMat.m[0][0])) {
+                    lockedStillValid = true;
+                    UpdateCandidateMotion(it->second, lockedMat, inputMotionEnergy);
+                }
+            }
+        }
+    }
+
+    // Fast-path: When camera is already locked and memory remains valid,
+    // immediately return without evaluating candidates on the render thread!
+    if (lockedStillValid) {
+        m_lockedConfidence = (std::max)(m_lockedConfidence, 0.90f);
+        return;
+    }
 
     uint8_t* bestPointer = nullptr;
     float bestScore = -1.0f;
@@ -125,19 +149,6 @@ void CameraDeltaTracker::PollAndTrackCandidates() {
             bestPointer = it->first;
         }
         ++it;
-    }
-
-    bool lockedStillValid = false;
-    if (m_lockedPointer) {
-        auto it = m_candidates.find(m_lockedPointer);
-        if (it != m_candidates.end()) {
-            Matrix4x4 lockedMat;
-            if (SafeReadMatrix(m_lockedPointer, it->second.isDoublePrecision, lockedMat)) {
-                if (PageScanner::IsValidViewMatrixFloat(&lockedMat.m[0][0])) {
-                    lockedStillValid = true;
-                }
-            }
-        }
     }
 
     if (bestPointer && bestScore >= 2.6f) { // base 2.0 + temporalScore >= 0.6

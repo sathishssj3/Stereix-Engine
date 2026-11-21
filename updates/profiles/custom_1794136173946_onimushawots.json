@@ -1,0 +1,22 @@
+{
+  "$schema": "./schema.json",
+  "id": "custom_1794136173946",
+  "name": "OnimushaWotS",
+  "engine": "Generic",
+  "api": "DX12",
+  "reverseZ": true,
+  "rowMajorMatrices": false,
+  "matrixPrecision": "Float32",
+  "motionAimSensitivity": 1,
+  "useRecommendedResolution": true,
+  "srgbCorrection": true,
+  "depthSubmission": false,
+  "rawInputMode": true,
+  "autoInjectOnLaunch": true,
+  "ipd": 0.064,
+  "convergence": 3.2,
+  "contrast": 1,
+  "saturation": 1,
+  "brightness": 1,
+  "aiNotes": "Capcom RE Engine: Configured Column-Major matrices, Reverse-Z, 3.2m third-person convergence, and protected depth fallback (prevents 0x887a002b device removal)."
+}

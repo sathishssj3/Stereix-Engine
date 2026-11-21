@@ -5,7 +5,14 @@ namespace vrinject {
 void Dx12DescriptorTracker::PopulateMetadata(ID3D12Resource* resource, DescriptorRecord& outRecord, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc) {
     if (!resource) return;
     
-    D3D12_RESOURCE_DESC desc = resource->GetDesc();
+    D3D12_RESOURCE_DESC desc = {};
+    __try {
+        desc = resource->GetDesc();
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        outRecord.isShaderReadable = false;
+        return;
+    }
+
     outRecord.width = static_cast<uint32_t>(desc.Width);
     outRecord.height = static_cast<uint32_t>(desc.Height);
     
@@ -24,6 +31,20 @@ void Dx12DescriptorTracker::PopulateMetadata(ID3D12Resource* resource, Descripto
     } else {
         outRecord.arraySize = 1;
     }
+
+    // Direct3D 12 strict SRV compatibility check:
+    // A resource CANNOT be bound as an SRV if it was created with D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE,
+    // or if its backing allocation is non-typeless depth-stencil (which causes GPU hardware fault 0x887a002b).
+    bool denyShader = (desc.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE) != 0;
+    bool isTypelessOrFloat = (
+        desc.Format == DXGI_FORMAT_R32G8X24_TYPELESS ||
+        desc.Format == DXGI_FORMAT_R32_TYPELESS ||
+        desc.Format == DXGI_FORMAT_R24G8_TYPELESS ||
+        desc.Format == DXGI_FORMAT_R16_TYPELESS ||
+        desc.Format == DXGI_FORMAT_R32_FLOAT ||
+        desc.Format == DXGI_FORMAT_R16_UNORM
+    );
+    outRecord.isShaderReadable = (!denyShader && isTypelessOrFloat);
 }
 
 void Dx12DescriptorTracker::RegisterDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE destHandle, ID3D12Resource* resource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc) {
@@ -66,6 +87,10 @@ bool Dx12DescriptorTracker::ResolveDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE handle
     auto it = m_descriptors.find(handle.ptr);
     if (it != m_descriptors.end()) {
         const DescriptorRecord& rec = it->second;
+        if (!rec.isShaderReadable) {
+            // Drop depth targets that cannot be legally sampled as SRV in compute shaders
+            return false;
+        }
         
         outIdentity.backend = GraphicsBackend::DX12;
         outIdentity.nativeHandle = rec.resource;

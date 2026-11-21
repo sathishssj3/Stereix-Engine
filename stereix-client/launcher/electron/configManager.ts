@@ -130,8 +130,8 @@ const curatedProfiles: Record<string, Partial<VRConfig>> = {
     matrixPrecision: 'Float32',
     motionAimSensitivity: 1.0,
     useRecommendedResolution: true,
-    srgbCorrection: true,
-    depthSubmission: false,
+    srgbCorrection: false,
+    depthSubmission: true,
     rawInputMode: true,
     autoInjectOnLaunch: true,
   },
@@ -263,6 +263,9 @@ function loadProfilesFromDisk(): Record<string, Partial<VRConfig>> {
                   contrast: typeof data.contrast === 'number' ? data.contrast : undefined,
                   saturation: typeof data.saturation === 'number' ? data.saturation : undefined,
                   brightness: typeof data.brightness === 'number' ? data.brightness : undefined,
+                  convergence: typeof data.convergence === 'number' ? data.convergence : undefined,
+                  ipd: typeof data.ipd === 'number' ? data.ipd : undefined,
+                  aiNotes: typeof data.aiNotes === 'string' ? data.aiNotes : undefined,
                 };
               }
             } catch {}
@@ -276,6 +279,11 @@ function loadProfilesFromDisk(): Record<string, Partial<VRConfig>> {
 
 let cachedProfiles: Record<string, Partial<VRConfig>> | null = null;
 let lastProfileLoad = 0;
+
+export function invalidateProfileCache(): void {
+  cachedProfiles = null;
+  lastProfileLoad = 0;
+}
 
 export function getActiveProfiles(): Record<string, Partial<VRConfig>> {
   const now = Date.now();
@@ -397,6 +405,9 @@ ipcMain.handle('config:write', async (event, id: string, cfg: unknown) => {
       reverseZ: validCfg.reverseZ ?? baseProfile.reverseZ,
       rowMajorMatrices: validCfg.rowMajorMatrices ?? baseProfile.rowMajorMatrices,
       matrixPrecision: validCfg.matrixPrecision ?? baseProfile.matrixPrecision,
+      convergence: validCfg.convergence ?? baseProfile.convergence,
+      ipd: validCfg.ipd ?? baseProfile.ipd,
+      aiNotes: validCfg.aiNotes ?? baseProfile.aiNotes,
     };
 
     for (const dir of dirsToSync) {

@@ -5,6 +5,10 @@
 #include "openxr/openxr_swapchain_manager.h"
 #include <d3d11.h>
 #include <chrono>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 namespace vrinject {
 namespace openxr {
@@ -12,7 +16,7 @@ namespace openxr {
 class OpenXRFrameSubmitter {
 public:
     OpenXRFrameSubmitter(OpenXRHealthMonitor* healthMonitor);
-    ~OpenXRFrameSubmitter() = default;
+    ~OpenXRFrameSubmitter();
 
     // DX11 Phased Submission
     bool BeginAndAcquireDX11(
@@ -73,13 +77,50 @@ public:
     SubmitterState GetState() const { return state_; }
     void ResetState() { state_ = SubmitterState::WAIT_FRAME; }
 
+    struct HudQuadConfig {
+        bool enabled = false;
+        XrSwapchain swapchain = XR_NULL_HANDLE;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        XrPosef pose = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, -0.95f}}; // 0.95m directly in front
+        XrExtent2Df size = {1.2f, 0.675f};                                 // 1.2m width, ~16:9 aspect
+    };
+
+    struct CinemaQuadConfig {
+        bool enabled = false;
+        float distance = 2.5f;          // Screen distance in meters
+        float sizeX = 3.2f;             // Screen width in meters
+        float sizeY = 1.8f;             // Screen height in meters
+        XrPosef pose = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, -2.5f}};
+        bool needsRecenter = true;
+    };
+
+    void SetHudQuad(XrSwapchain swapchain, uint32_t width, uint32_t height, float distance = 0.95f, float sizeX = 1.2f, float sizeY = 0.675f);
+    void ClearHudQuad();
+    const HudQuadConfig& GetHudQuadConfig() const { return hudQuadConfig_; }
+
+    void SetCinemaQuad(bool enabled, float distance = 2.5f, float width = 1920.0f, float height = 1080.0f);
+    void RequestCinemaRecenter();
+    void RecenterCinemaQuad(const XrPosef& headPose);
+    const CinemaQuadConfig& GetCinemaQuadConfig() const { return cinemaQuadConfig_; }
+
 private:
     bool LocateViews(XrSession session, XrSpace referenceSpace, 
                      XrPosef& outLeftPose, XrFovf& outLeftFov,
                      XrPosef& outRightPose, XrFovf& outRightFov);
 
+    // Asynchronous Frame Pacing Engine
+    void EnsurePacingThreadRunning(XrSession session);
+    void StopPacingThread();
+    void PacingThreadLoop();
+    bool WaitAndBeginFrame(XrSession session);
+    bool ConsumePacedFrameState(XrSession session, XrFrameState& outFrameState);
+    void TriggerNextPacingWait(XrSession session);
+
     OpenXRHealthMonitor* healthMonitor_ = nullptr;
     SubmitterState state_ = SubmitterState::WAIT_FRAME;
+    HudQuadConfig hudQuadConfig_;
+    CinemaQuadConfig cinemaQuadConfig_;
 
     XrFrameState currentFrameState_{XR_TYPE_FRAME_STATE};
     
@@ -91,6 +132,17 @@ private:
 
     uint32_t lastAcquiredLeftIndex_ = 0;
     uint32_t lastAcquiredRightIndex_ = 0;
+
+    // Pacing thread synchronization state
+    std::thread pacingThread_;
+    std::mutex pacingMutex_;
+    std::condition_variable cvPacingRequest_;
+    std::condition_variable cvPacingReady_;
+    XrSession pacingSession_ = XR_NULL_HANDLE;
+    XrFrameState pacingFrameState_{XR_TYPE_FRAME_STATE};
+    std::atomic<bool> pacingRunning_{false};
+    bool pacingWaitRequested_ = false;
+    bool pacingFrameReady_ = false;
 };
 
 } // namespace openxr

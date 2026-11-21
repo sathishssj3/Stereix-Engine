@@ -1,0 +1,1660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stereix Engine — J.N.N Ideathon 2026 Pitch Deck</title>
+    <!-- Embedded Fonts from Stereix Engine Design System -->
+    <style>
+        @font-face {
+            font-family: 'Chakra Petch';
+            font-style: normal;
+            font-weight: 500;
+            font-display: swap;
+            src: url('./assets/fonts/chakra-petch-500.woff2') format('woff2');
+        }
+        @font-face {
+            font-family: 'Chakra Petch';
+            font-style: normal;
+            font-weight: 600;
+            font-display: swap;
+            src: url('./assets/fonts/chakra-petch-600.woff2') format('woff2');
+        }
+        @font-face {
+            font-family: 'Chakra Petch';
+            font-style: normal;
+            font-weight: 700;
+            font-display: swap;
+            src: url('./assets/fonts/chakra-petch-700.woff2') format('woff2');
+        }
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-weight: 400;
+            font-display: swap;
+            src: url('./assets/fonts/inter-400.woff2') format('woff2');
+        }
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-weight: 500;
+            font-display: swap;
+            src: url('./assets/fonts/inter-500.woff2') format('woff2');
+        }
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-weight: 600;
+            font-display: swap;
+            src: url('./assets/fonts/inter-600.woff2') format('woff2');
+        }
+        @font-face {
+            font-family: 'JetBrains Mono';
+            font-style: normal;
+            font-weight: 500;
+            font-display: swap;
+            src: url('./assets/fonts/jetbrains-mono-500.woff2') format('woff2');
+        }
+        @font-face {
+            font-family: 'JetBrains Mono';
+            font-style: normal;
+            font-weight: 700;
+            font-display: swap;
+            src: url('./assets/fonts/jetbrains-mono-700.woff2') format('woff2');
+        }
+
+        :root {
+            --bg-void: #000000;
+            --bg-panel: #07070A;
+            --bg-card: #0E0E14;
+            --bg-elevated: #14141E;
+            --border-dim: #1D1E28;
+            --border-bright: #2E3040;
+            --border-glow: rgba(220, 20, 60, 0.4);
+            
+            --crimson: #DC143C;
+            --crimson-glow: #FF2A55;
+            --crimson-subtle: rgba(220, 20, 60, 0.12);
+            --emerald: #10B981;
+            --amber: #F59E0B;
+            --cyan: #06B6D4;
+            
+            --text-main: #F4F4F6;
+            --text-muted: #9E9EA8;
+            --text-dim: #646473;
+            
+            --font-display: 'Chakra Petch', -apple-system, sans-serif;
+            --font-body: 'Inter', -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            
+            --transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-void);
+            color: var(--text-main);
+            font-family: var(--font-body);
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Subtle cybernetic scanline and grid background */
+        .cyber-bg {
+            position: fixed;
+            inset: 0;
+            background: 
+                radial-gradient(circle at 50% 0%, rgba(220, 20, 60, 0.08) 0%, transparent 60%),
+                radial-gradient(circle at 100% 100%, rgba(220, 20, 60, 0.05) 0%, transparent 50%),
+                linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+            background-size: 100% 100%, 100% 100%, 48px 48px, 48px 48px;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Top Progress Bar */
+        .progress-track {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.06);
+            z-index: 100;
+        }
+        .progress-indicator {
+            height: 100%;
+            width: 14.28%;
+            background: linear-gradient(90deg, var(--crimson), var(--crimson-glow));
+            box-shadow: 0 0 12px var(--crimson-glow);
+            transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Header Bar */
+        .deck-header {
+            position: fixed;
+            top: 12px;
+            left: 28px;
+            right: 28px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 90;
+            font-family: var(--font-display);
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .brand-logo-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .brand-logo-img {
+            height: 28px;
+            width: auto;
+            filter: drop-shadow(0 0 8px rgba(220, 20, 60, 0.6));
+        }
+        .brand-name {
+            font-size: 1.15rem;
+            font-weight: 700;
+            letter-spacing: 0.15em;
+            color: #FFFFFF;
+        }
+        .brand-name span {
+            color: var(--crimson);
+        }
+        .event-badge {
+            background: rgba(220, 20, 60, 0.12);
+            border: 1px solid rgba(220, 20, 60, 0.35);
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.72rem;
+            letter-spacing: 0.12em;
+            color: var(--crimson-glow);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-family: var(--font-mono);
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+        .college-tag {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            letter-spacing: 0.08em;
+            text-align: right;
+            line-height: 1.3;
+        }
+        .college-tag strong {
+            color: #FFFFFF;
+        }
+
+        /* 16:9 Presentation Frame */
+        .deck-viewport {
+            position: relative;
+            width: min(94vw, 1500px);
+            aspect-ratio: 16 / 9;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-dim);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 30px rgba(220, 20, 60, 0.08);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Slide Core */
+        .slide {
+            position: absolute;
+            inset: 0;
+            padding: 44px 56px 40px 56px;
+            display: flex;
+            flex-direction: column;
+            opacity: 0;
+            visibility: hidden;
+            transform: scale(0.985) translateY(8px);
+            transition: opacity 0.45s ease, transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.45s;
+            pointer-events: none;
+        }
+        .slide.active {
+            opacity: 1;
+            visibility: visible;
+            transform: scale(1) translateY(0);
+            pointer-events: auto;
+        }
+
+        /* Slide Top Labeling */
+        .slide-tagline {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--crimson-glow);
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .slide-tagline::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: var(--crimson);
+            border-radius: 2px;
+            box-shadow: 0 0 8px var(--crimson);
+        }
+        .slide-headline {
+            font-family: var(--font-display);
+            font-size: 2.2rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            color: #FFFFFF;
+            line-height: 1.15;
+            margin-bottom: 22px;
+        }
+        .slide-headline span {
+            color: var(--crimson);
+        }
+
+        /* Bottom Controls */
+        .deck-controls {
+            position: fixed;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: rgba(14, 14, 20, 0.9);
+            border: 1px solid var(--border-bright);
+            padding: 8px 20px;
+            border-radius: 30px;
+            backdrop-filter: blur(12px);
+            z-index: 95;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+        }
+        .btn-ctrl {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border-dim);
+            color: var(--text-main);
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: var(--transition);
+            font-size: 0.95rem;
+        }
+        .btn-ctrl:hover {
+            background: var(--crimson);
+            border-color: var(--crimson);
+            color: #FFF;
+            box-shadow: 0 0 12px var(--crimson-glow);
+        }
+        .slide-counter {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            letter-spacing: 0.1em;
+            padding: 0 8px;
+        }
+        .slide-counter strong {
+            color: var(--crimson-glow);
+        }
+        .btn-text-action {
+            background: transparent;
+            border: 1px solid var(--border-dim);
+            color: var(--text-muted);
+            padding: 6px 14px;
+            border-radius: 16px;
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            letter-spacing: 0.08em;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .btn-text-action:hover, .btn-text-action.active {
+            background: var(--crimson-subtle);
+            border-color: var(--crimson);
+            color: var(--crimson-glow);
+        }
+
+        /* Speaker Notes Drawer */
+        .notes-drawer {
+            position: fixed;
+            bottom: 74px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            width: min(88vw, 1000px);
+            background: rgba(8, 8, 12, 0.96);
+            border: 1px solid var(--crimson);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.95), 0 0 20px rgba(220, 20, 60, 0.25);
+            border-radius: 10px;
+            padding: 16px 24px;
+            z-index: 92;
+            opacity: 0;
+            visibility: hidden;
+            transition: var(--transition);
+            backdrop-filter: blur(16px);
+        }
+        .notes-drawer.open {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) translateY(0);
+        }
+        .notes-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            border-bottom: 1px solid var(--border-dim);
+            padding-bottom: 6px;
+        }
+        .notes-title {
+            font-family: var(--font-display);
+            font-size: 0.85rem;
+            letter-spacing: 0.12em;
+            color: var(--crimson-glow);
+            text-transform: uppercase;
+        }
+        .notes-body {
+            font-size: 0.88rem;
+            color: #D1D1DB;
+            line-height: 1.5;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        .notes-body strong {
+            color: #FFF;
+        }
+
+        /* ==============================================================
+           SLIDE-SPECIFIC CUSTOM LAYOUTS (EXACTLY 7 SLIDES)
+           ============================================================== */
+
+        /* SLIDE 1: Title & Team */
+        .title-layout {
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 36px;
+            height: 100%;
+            align-items: center;
+        }
+        .title-hero-box {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .title-subheading {
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            color: var(--crimson-glow);
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .title-main-h1 {
+            font-family: var(--font-display);
+            font-size: 3.6rem;
+            font-weight: 700;
+            line-height: 1.05;
+            letter-spacing: 0.03em;
+            color: #FFFFFF;
+        }
+        .title-main-h1 span {
+            background: linear-gradient(135deg, #FFF 20%, var(--crimson) 80%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .title-one-liner {
+            font-size: 1.1rem;
+            color: #C0C0D0;
+            line-height: 1.5;
+            border-left: 3px solid var(--crimson);
+            padding-left: 16px;
+            margin-top: 6px;
+        }
+        .title-badges {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .tech-pill {
+            background: var(--bg-card);
+            border: 1px solid var(--border-bright);
+            padding: 6px 14px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: #A0A0B0;
+        }
+        .tech-pill.red {
+            border-color: var(--crimson);
+            color: var(--crimson-glow);
+            background: var(--crimson-subtle);
+        }
+
+        .title-team-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-bright);
+            border-radius: 10px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            position: relative;
+            overflow: hidden;
+        }
+        .title-team-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--crimson), transparent);
+        }
+        .team-header-title {
+            font-family: var(--font-display);
+            font-size: 0.95rem;
+            letter-spacing: 0.15em;
+            color: #FFF;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--border-dim);
+            padding-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .team-member-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+        .member-avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 6px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--crimson);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-display);
+            font-weight: 700;
+            color: var(--crimson-glow);
+            font-size: 1.1rem;
+        }
+        .member-info h4 {
+            font-size: 0.98rem;
+            font-weight: 600;
+            color: #FFF;
+        }
+        .member-info p {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+        .dept-affiliation {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px dashed var(--border-bright);
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+        .dept-affiliation strong {
+            color: #FFFFFF;
+        }
+
+        /* SLIDE 2: Problem Statement */
+        .problem-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            flex: 1;
+        }
+        .problem-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            border-radius: 8px;
+            padding: 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            position: relative;
+            transition: var(--transition);
+        }
+        .problem-card:hover {
+            border-color: var(--crimson);
+            transform: translateY(-4px);
+            box-shadow: 0 10px 24px rgba(220, 20, 60, 0.15);
+        }
+        .card-num {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--crimson);
+            letter-spacing: 0.1em;
+        }
+        .card-title {
+            font-family: var(--font-display);
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #FFF;
+        }
+        .card-body {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+            flex: 1;
+        }
+        .card-metric-highlight {
+            background: rgba(220, 20, 60, 0.08);
+            border: 1px solid rgba(220, 20, 60, 0.25);
+            padding: 8px 12px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .metric-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .metric-val {
+            font-family: var(--font-mono);
+            font-weight: 700;
+            color: var(--crimson-glow);
+            font-size: 0.95rem;
+        }
+
+        /* SLIDE 3: Proposed Product */
+        .product-split {
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 26px;
+            flex: 1;
+        }
+        .product-pillars {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .pillar-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            border-radius: 8px;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            transition: var(--transition);
+        }
+        .pillar-card:hover {
+            border-color: var(--crimson);
+            background: var(--bg-elevated);
+        }
+        .pillar-icon {
+            font-size: 1.3rem;
+            color: var(--crimson);
+        }
+        .pillar-title {
+            font-family: var(--font-display);
+            font-size: 1.05rem;
+            color: #FFF;
+            font-weight: 600;
+        }
+        .pillar-desc {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            line-height: 1.45;
+        }
+        .product-preview-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-bright);
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            position: relative;
+        }
+        .preview-header {
+            font-family: var(--font-display);
+            font-size: 0.9rem;
+            letter-spacing: 0.12em;
+            color: #FFF;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-dim);
+            padding-bottom: 8px;
+        }
+        .flow-step {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-dim);
+            padding: 10px 14px;
+            border-radius: 6px;
+        }
+        .step-badge {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            background: var(--crimson);
+            color: #FFF;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .step-txt h5 {
+            font-size: 0.85rem;
+            color: #FFF;
+            margin-bottom: 2px;
+        }
+        .step-txt p {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        /* SLIDE 4: Technology & Innovation */
+        .tech-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            flex: 1;
+        }
+        .tech-arch-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .arch-step-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            flex: 1;
+        }
+        .arch-node {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--bg-elevated);
+            border-left: 3px solid var(--crimson);
+            padding: 10px 14px;
+            border-radius: 0 6px 6px 0;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+        }
+        .arch-node strong {
+            color: #FFF;
+        }
+        .diff-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.78rem;
+            margin-top: 4px;
+        }
+        .diff-table th {
+            text-align: left;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border-bright);
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            letter-spacing: 0.05em;
+        }
+        .diff-table td {
+            padding: 10px 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            color: #C0C0D0;
+        }
+        .diff-table tr:hover td {
+            background: rgba(220, 20, 60, 0.04);
+        }
+        .winner-cell {
+            color: var(--crimson-glow) !important;
+            font-weight: 600;
+        }
+
+        /* SLIDE 5: Target Market & Business Model */
+        .market-split {
+            display: grid;
+            grid-template-columns: 0.95fr 1.05fr;
+            gap: 26px;
+            flex: 1;
+        }
+        .market-stats {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .tam-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            border-radius: 8px;
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .tam-num {
+            font-family: var(--font-display);
+            font-size: 2rem;
+            font-weight: 700;
+            color: #FFF;
+        }
+        .tam-num.red {
+            color: var(--crimson-glow);
+        }
+        .b2b-tiers-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 6px;
+        }
+        .tier-box {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-dim);
+            padding: 12px;
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .tier-price {
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            color: var(--crimson-glow);
+            font-weight: 700;
+        }
+        .tier-title {
+            font-size: 0.8rem;
+            color: #FFF;
+            font-weight: 600;
+        }
+        .tier-desc {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+        }
+        .chart-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            border-radius: 8px;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            position: relative;
+        }
+        .chart-canvas-wrap {
+            flex: 1;
+            position: relative;
+            min-height: 240px;
+        }
+
+        /* SLIDE 6: Feasibility & Impact */
+        .feasibility-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            flex: 1;
+        }
+        .metric-banner-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+        .metric-banner-box {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-bright);
+            padding: 12px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .metric-banner-val {
+            font-family: var(--font-display);
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--crimson-glow);
+        }
+        .metric-banner-lbl {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+        .roadmap-timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 8px;
+        }
+        .roadmap-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-dim);
+            padding: 12px 14px;
+            border-radius: 6px;
+        }
+        .roadmap-item.active {
+            border-color: var(--crimson);
+            background: var(--crimson-subtle);
+        }
+        .roadmap-q {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--crimson-glow);
+            font-weight: 700;
+            background: var(--bg-elevated);
+            padding: 3px 8px;
+            border-radius: 4px;
+            border: 1px solid var(--border-dim);
+        }
+        .roadmap-txt h5 {
+            font-size: 0.85rem;
+            color: #FFF;
+        }
+        .roadmap-txt p {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* SLIDE 7: Future Scope & Incubation Support */
+        .future-split {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            flex: 1;
+        }
+        .incubation-reasons {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .incubation-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-dim);
+            border-radius: 8px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            transition: var(--transition);
+        }
+        .incubation-box:hover {
+            border-color: var(--crimson);
+            transform: translateX(4px);
+        }
+        .inc-icon {
+            font-size: 1.25rem;
+            color: var(--crimson-glow);
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        .inc-content h5 {
+            font-size: 0.9rem;
+            color: #FFF;
+            margin-bottom: 2px;
+        }
+        .inc-content p {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+        .grant-ask-box {
+            background: linear-gradient(135deg, rgba(220, 20, 60, 0.15) 0%, rgba(10, 10, 14, 0.9) 100%);
+            border: 1px solid var(--crimson);
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 0 24px rgba(220, 20, 60, 0.2);
+        }
+        .grant-amount {
+            font-family: var(--font-display);
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: #FFF;
+        }
+        .grant-amount span {
+            color: var(--crimson-glow);
+        }
+
+        /* Print styles for generating flawless 16:9 PDF */
+        @media print {
+            body {
+                background: #000;
+                height: auto;
+                overflow: visible;
+            }
+            .cyber-bg, .deck-controls, .progress-track, .deck-header, .notes-drawer {
+                display: none !important;
+            }
+            .deck-viewport {
+                width: 100% !important;
+                height: 100vh !important;
+                border: none !important;
+                box-shadow: none !important;
+                border-radius: 0 !important;
+                aspect-ratio: auto !important;
+            }
+            .slide {
+                position: relative !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+                transform: none !important;
+                page-break-after: always;
+                padding: 40px 60px;
+                display: flex !important;
+            }
+        }
+    </style>
+    <!-- Chart.js for Live Data Visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+    <div class="cyber-bg"></div>
+
+    <!-- Top Laser Sweep Progress Bar -->
+    <div class="progress-track">
+        <div class="progress-indicator" id="progressIndicator"></div>
+    </div>
+
+    <!-- Presentation Header -->
+    <header class="deck-header">
+        <div class="header-left">
+            <div class="brand-logo-wrap">
+                <img src="./assets/logo.png" alt="Stereix" class="brand-logo-img" onerror="this.style.display='none'">
+                <div class="brand-name">STEREIX<span>ENGINE</span></div>
+            </div>
+            <div class="event-badge">
+                <span>⚡</span> J.N.N IDEATHON 2026 | JJISIC FOUNDATION
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="college-tag">
+                <strong>J.N.N INSTITUTE OF ENGINEERING (AUTONOMOUS)</strong><br>
+                <span>Innovation & Startup Incubation Center (JJISIC)</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main 16:9 Presentation Frame -->
+    <main class="deck-viewport">
+
+        <!-- ==============================================================
+             SLIDE 1: TITLE & TEAM (Poster Format: Slide 1)
+             Product name, team members, department & one-line idea summary
+             ============================================================== -->
+        <section class="slide active" id="slide-1" data-slide="1">
+            <div class="title-layout">
+                <div class="title-hero-box">
+                    <div class="title-subheading">
+                        <span>●</span> B2B GRAPHICS MIDDLEWARE & SPATIAL SDK
+                    </div>
+                    <h1 class="title-main-h1">
+                        STEREIX <span>ENGINE</span>
+                    </h1>
+                    <p class="title-one-liner">
+                        A low-overhead B2B Graphics SDK and Zero-Code Runtime that transforms standard flat PC and console game titles into full 6DOF VR experiences in <strong>under 48 hours</strong> with <strong>95% cost reduction</strong>.
+                    </p>
+                    <div class="title-badges">
+                        <span class="tech-pill red">✓ C++20 Core Baseline</span>
+                        <span class="tech-pill">DirectX 11 / 12 & Vulkan</span>
+                        <span class="tech-pill">DirectML Neural Inpainting</span>
+                        <span class="tech-pill">Khronos OpenXR 1.0.34</span>
+                    </div>
+                </div>
+
+                <div class="title-team-card">
+                    <div class="team-header-title">
+                        <span>Product & Team Profile</span>
+                        <span style="color: var(--crimson-glow); font-family: var(--font-mono); font-size: 0.75rem;">TEAM 01</span>
+                    </div>
+                    <div class="team-member-item">
+                        <div class="member-avatar">SK</div>
+                        <div class="member-info">
+                            <h4>Sathish Kumar S</h4>
+                            <p>Founder & Lead Systems Architect</p>
+                        </div>
+                    </div>
+                    <div class="dept-affiliation">
+                        <strong>Department:</strong> Computer Science & Engineering<br>
+                        <strong>Institution:</strong> J.N.N Institute of Engineering (Autonomous)<br>
+                        <strong>Incubation Target:</strong> JJISIC Foundation Startup Cohort 2026
+                    </div>
+                    <div style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-dim); display: flex; justify-content: space-between;">
+                        <span>STATUS: ENGINE v0.1.101</span>
+                        <span>DATE: NOV 2026</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==============================================================
+             SLIDE 2: PROBLEM STATEMENT (Poster Format: Slide 2)
+             The problem, why it matters, and who experiences it
+             ============================================================== -->
+        <section class="slide" id="slide-2" data-slide="2">
+            <div class="slide-tagline">SLIDE 02 // CHALLENGE ANALYSIS</div>
+            <h2 class="slide-headline">The <span>$5M Flat-to-VR</span> Porting Bottleneck</h2>
+            
+            <div class="problem-grid">
+                <div class="problem-card">
+                    <div class="card-num">01 / CAPITAL & TIME EXTINCTION</div>
+                    <div class="card-title">Astronomical Porting Costs</div>
+                    <div class="card-body">
+                        Porting a flat PC/console title to native VR currently requires <strong>12 to 18 months</strong> of bespoke engineering, costing studios <strong>$2M – $5M per game</strong> with massive financial risk.
+                    </div>
+                    <div class="card-metric-highlight">
+                        <span class="metric-label">Typical Studio Port Cost</span>
+                        <span class="metric-val">$2,000,000+</span>
+                    </div>
+                </div>
+
+                <div class="problem-card">
+                    <div class="card-num">02 / HARDWARE CONTENT DROUGHT</div>
+                    <div class="card-title">Idle VR Headsets</div>
+                    <div class="card-body">
+                        Over <strong>30M+ headsets sold</strong> sit gathering dust. AAA publishers refuse to make VR exclusives because smaller user bases can’t recoup $50M+ budgets, causing a critical content famine.
+                    </div>
+                    <div class="card-metric-highlight">
+                        <span class="metric-label">Active Headsets on PC</span>
+                        <span class="metric-val">2.53 Million</span>
+                    </div>
+                </div>
+
+                <div class="problem-card">
+                    <div class="card-num">03 / CONSUMER MOD INFERIORITY</div>
+                    <div class="card-title">Nausea & Clunky Mods</div>
+                    <div class="card-body">
+                        Existing community hacks (VorpX, LukeRoss) suffer from severe retinal eye strain, 2D glued HUDs, and alternating-eye flickering (AER) that triggers acute motion sickness within 15 minutes.
+                    </div>
+                    <div class="card-metric-highlight">
+                        <span class="metric-label">Avg Mod Setup Time</span>
+                        <span class="metric-val">120+ Minutes</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==============================================================
+             SLIDE 3: PROPOSED PRODUCT (Poster Format: Slide 3)
+             Your solution, key features and how it addresses the problem
+             ============================================================== -->
+        <section class="slide" id="slide-3" data-slide="3">
+            <div class="slide-tagline">SLIDE 03 // B2B SOLUTION ARCHITECTURE</div>
+            <h2 class="slide-headline">Stereix B2B SDK: <span>Zero-Code Spatialization</span></h2>
+
+            <div class="product-split">
+                <div class="product-pillars">
+                    <div class="pillar-card">
+                        <div class="pillar-icon">⚡</div>
+                        <div class="pillar-title">Driver-Level Detour Hooking</div>
+                        <div class="pillar-desc">
+                            Intercepts DirectX 11/12 & Vulkan swapchains non-invasively. Zero game code changes and zero engine rebuilds required.
+                        </div>
+                    </div>
+
+                    <div class="pillar-card">
+                        <div class="pillar-icon">🧠</div>
+                        <div class="pillar-title">DirectML Neural Inpainting</div>
+                        <div class="pillar-desc">
+                            Proprietary ONNX bilateral filter synthesizes occluded background geometry in <strong>&lt; 1.5ms</strong> on the graphics render thread.
+                        </div>
+                    </div>
+
+                    <div class="pillar-card">
+                        <div class="pillar-icon">🌐</div>
+                        <div class="pillar-title">Dynamic Curved 3D HUD</div>
+                        <div class="pillar-desc">
+                            Extracts 2D interface render passes and projects them onto an ergonomically curved quad in 3D world space, eliminating retinal strain.
+                        </div>
+                    </div>
+
+                    <div class="pillar-card">
+                        <div class="pillar-icon">🎮</div>
+                        <div class="pillar-title">Native OpenXR 6DOF Tracking</div>
+                        <div class="pillar-desc">
+                            Converts headset pose and motion controller vectors into game camera matrices and actions at native 90/120 FPS.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="product-preview-panel">
+                    <div class="preview-header">
+                        <span>HOW IT SOLVES THE PROBLEM</span>
+                        <span style="color: var(--crimson-glow); font-family: var(--font-mono); font-size: 0.75rem;">48-HR PIPELINE</span>
+                    </div>
+
+                    <div class="flow-step">
+                        <div class="step-badge">1</div>
+                        <div class="step-txt">
+                            <h5>Game Studio Integrates Stereix SDK</h5>
+                            <p>Studio drops the 4MB lightweight runtime DLL into build pipeline.</p>
+                        </div>
+                    </div>
+
+                    <div class="flow-step">
+                        <div class="step-badge">2</div>
+                        <div class="step-txt">
+                            <h5>Automated Profile Calibration</h5>
+                            <p>Depth buffer format, FOV matrices, and HUD shaders autodetected.</p>
+                        </div>
+                    </div>
+
+                    <div class="flow-step">
+                        <div class="step-badge">3</div>
+                        <div class="step-txt">
+                            <h5>Instant Commercial VR Release</h5>
+                            <p>Studio publishes a high-margin VR edition on Steam & PlayStation Store.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==============================================================
+             SLIDE 4: TECHNOLOGY & INNOVATION (Poster Format: Slide 4)
+             Core technologies, architecture/concept & what makes it different
+             ============================================================== -->
+        <section class="slide" id="slide-4" data-slide="4">
+            <div class="slide-tagline">SLIDE 04 // DEEP-TECH INNOVATION</div>
+            <h2 class="slide-headline">Core Architecture & <span>Competitive Moats</span></h2>
+
+            <div class="tech-layout">
+                <div class="tech-arch-card">
+                    <div style="font-family: var(--font-display); font-size: 0.95rem; color: #FFF; letter-spacing: 0.1em; border-bottom: 1px solid var(--border-dim); padding-bottom: 6px;">
+                        TECHNICAL PIPELINE WORKFLOW
+                    </div>
+                    <div class="arch-step-list">
+                        <div class="arch-node">
+                            <span>1.</span> <strong>Direct3D/Vulkan Detour</strong> (MinHook intercepting Present)
+                        </div>
+                        <div class="arch-node">
+                            <span>2.</span> <strong>Z-Buffer & Camera Matrix Interception</strong> (Reverse-Z depth)
+                        </div>
+                        <div class="arch-node">
+                            <span>3.</span> <strong>DirectML Neural Disocclusion</strong> (&lt;1.5ms bilateral filling)
+                        </div>
+                        <div class="arch-node">
+                            <span>4.</span> <strong>Curved UI World-Space Compositor</strong> (Spatial decouple)
+                        </div>
+                        <div class="arch-node">
+                            <span>5.</span> <strong>Khronos OpenXR Multiview Submission</strong> (Native 90 FPS)
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tech-arch-card">
+                    <div style="font-family: var(--font-display); font-size: 0.95rem; color: #FFF; letter-spacing: 0.1em; border-bottom: 1px solid var(--border-dim); padding-bottom: 6px;">
+                        WHAT MAKES STEREIX DIFFERENT
+                    </div>
+                    <table class="diff-table">
+                        <thead>
+                            <tr>
+                                <th>FEATURE</th>
+                                <th>PRAYDOG UEVR</th>
+                                <th>LUKEROSS AER</th>
+                                <th>STEREIX ENGINE</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Engine Support</td>
+                                <td>Unreal Only</td>
+                                <td>Few Fixed Titles</td>
+                                <td class="winner-cell">Universal Custom</td>
+                            </tr>
+                            <tr>
+                                <td>Stereo Method</td>
+                                <td>Native / Dual Pass</td>
+                                <td>Alternating Eye (AER)</td>
+                                <td class="winner-cell">DirectML Real-Time</td>
+                            </tr>
+                            <tr>
+                                <td>Motion Sickness</td>
+                                <td>Moderate</td>
+                                <td>Severe Nausea</td>
+                                <td class="winner-cell">Zero Eye Strain (Curved HUD)</td>
+                            </tr>
+                            <tr>
+                                <td>Target Audience</td>
+                                <td>Hobbyist Modders</td>
+                                <td>Patreon Subscribers</td>
+                                <td class="winner-cell">B2B Game Studios (SDK)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==============================================================
+             SLIDE 5: TARGET MARKET & BUSINESS MODEL (Poster Format: Slide 5)
+             Potential customers, market need, competitors & revenue opportunity
+             ============================================================== -->
+        <section class="slide" id="slide-5" data-slide="5">
+            <div class="slide-tagline">SLIDE 05 // COMMERCIAL POTENTIAL</div>
+            <h2 class="slide-headline">Target Market & <span>B2B Monetization</span></h2>
+
+            <div class="market-split">
+                <div class="market-stats">
+                    <div class="tam-card">
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">TOTAL ADDRESSABLE MARKET (TAM)</div>
+                            <div class="tam-num">$32.4B</div>
+                            <div style="font-size: 0.75rem; color: var(--text-dim);">Global Spatial & VR Gaming by 2028</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">SERVICEABLE MARKET (SAM)</div>
+                            <div class="tam-num red">$2.8B</div>
+                            <div style="font-size: 0.75rem; color: var(--text-dim);">PC/Console Backlog Porting</div>
+                        </div>
+                    </div>
+
+                    <div class="b2b-tiers-grid">
+                        <div class="tier-box">
+                            <div class="tier-price">$25,000 / Game</div>
+                            <div class="tier-title">Mid-Tier SDK DevKit</div>
+                            <div class="tier-desc">One-time studio integration license + 5% VR revenue share.</div>
+                        </div>
+
+                        <div class="tier-box">
+                            <div class="tier-price">$100,000+ / Title</div>
+                            <div class="tier-title">AAA Enterprise License</div>
+                            <div class="tier-desc">Dedicated graphics engineer co-development + SLA.</div>
+                        </div>
+
+                        <div class="tier-box">
+                            <div class="tier-price">5% Royalty</div>
+                            <div class="tier-title">VR Edition Revenue Share</div>
+                            <div class="tier-desc">Recurring stream on all VR remaster sales & DLC.</div>
+                        </div>
+
+                        <div class="tier-box">
+                            <div class="tier-price">OEM Bundling</div>
+                            <div class="tier-title">Hardware Vendor Licenses</div>
+                            <div class="tier-desc">Pre-installed runtime licensing for Meta & Sony.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-box">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-family: var(--font-display); font-size: 0.85rem; color: #FFF; letter-spacing: 0.1em;">B2B REVENUE PROJECTION (₹ CRORES)</span>
+                        <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--crimson-glow);">YEAR 1 - YEAR 3</span>
+                    </div>
+                    <div class="chart-canvas-wrap">
+                        <canvas id="marketChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==============================================================
+             SLIDE 6: FEASIBILITY & IMPACT (Poster Format: Slide 6)
+             Resources needed, estimated cost, development roadmap & expected impact
+             ============================================================== -->
+        <section class="slide" id="slide-6" data-slide="6">
+            <div class="slide-tagline">SLIDE 06 // EXECUTION & VIABILITY</div>
+            <h2 class="slide-headline">Feasibility, Roadmap & <span>Industry Impact</span></h2>
+
+            <div class="feasibility-grid">
+                <div>
+                    <div class="metric-banner-row">
+                        <div class="metric-banner-box">
+                            <div class="metric-banner-val">95%</div>
+                            <div class="metric-banner-lbl">Cost Reduction</div>
+                        </div>
+                        <div class="metric-banner-box">
+                            <div class="metric-banner-val">48 Hrs</div>
+                            <div class="metric-banner-lbl">Porting Turnaround</div>
+                        </div>
+                        <div class="metric-banner-box">
+                            <div class="metric-banner-val">85+</div>
+                            <div class="metric-banner-lbl">C++ Unit Tests Passed</div>
+                        </div>
+                    </div>
+
+                    <div style="background: var(--bg-card); border: 1px solid var(--border-dim); border-radius: 8px; padding: 16px; margin-top: 10px;">
+                        <div style="font-family: var(--font-display); font-size: 0.85rem; color: #FFF; margin-bottom: 8px;">
+                            CAPITAL BUDGET & RESOURCES (YEAR 1)
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.78rem; color: var(--text-muted); font-family: var(--font-mono);">
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>VR Test Hardware (Quest 3, PSVR2 Adapter)</span>
+                                <strong style="color: #FFF;">₹1,80,000</strong>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>DirectML High-Performance Test Rig</span>
+                                <strong style="color: #FFF;">₹2,20,000</strong>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>Cloud Infrastructure & CI/CD Pipelines</span>
+                                <strong style="color: #FFF;">₹60,000</strong>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; border-top: 1px solid var(--border-dim); padding-top: 4px; color: var(--crimson-glow);">
+                                <span>TOTAL ESTIMATED RUNWAY</span>
+                                <strong>₹4,60,000</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="font-family: var(--font-display); font-size: 0.9rem; color: #FFF; letter-spacing: 0.1em; margin-bottom: 6px;">
+                        DEVELOPMENT ROADMAP
+                    </div>
+                    <div class="roadmap-timeline">
+                        <div class="roadmap-item active">
+                            <div class="roadmap-q">Q4 2026</div>
+                            <div class="roadmap-txt">
+                                <h5>Baseline Engine & SDK Alpha [CURRENT]</h5>
+                                <p>C++20 detours operational; 85 unit tests & CI gates passing.</p>
+                            </div>
+                        </div>
+
+                        <div class="roadmap-item">
+                            <div class="roadmap-q">Q1 2027</div>
+                            <div class="roadmap-txt">
+                                <h5>Studio Pilot Partner Cohort</h5>
+                                <p>Onboard 3 indie studios to port their PC back catalog in 48 hours.</p>
+                            </div>
+                        </div>
+
+                        <div class="roadmap-item">
+                            <div class="roadmap-q">Q3 2027</div>
+                            <div class="roadmap-txt">
+                                <h5>Console Expansion (PlayStation VR2 SDK)</h5>
+                                <p>Custom Vulkan/DirectX 12 console porting pipeline & OEM agreements.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==============================================================
+             SLIDE 7: FUTURE SCOPE & SUPPORT (Poster Format: Slide 7)
+             Future development, scalability, funding estimate & why incubation
+             ============================================================== -->
+        <section class="slide" id="slide-7" data-slide="7">
+            <div class="slide-tagline">SLIDE 07 // FUTURE HORIZONS & INCUBATION</div>
+            <h2 class="slide-headline">Future Scope & <span>JJISIC Incubation Ask</span></h2>
+
+            <div class="future-split">
+                <div class="incubation-reasons">
+                    <div class="incubation-box">
+                        <div class="inc-icon">📜</div>
+                        <div class="inc-content">
+                            <h5>Deep-Tech Patent & IP Protection</h5>
+                            <p>Assistance in filing Indian & PCT provisional patents for DirectML bilateral depth synthesis and swapchain detour hooking.</p>
+                        </div>
+                    </div>
+
+                    <div class="incubation-box">
+                        <div class="inc-icon">🏢</div>
+                        <div class="inc-content">
+                            <h5>Startup Incorporation & DBIT Certification</h5>
+                            <p>Private Limited company incorporation under JJISIC, Startup India DPIIT registration, and tax exemptions.</p>
+                        </div>
+                    </div>
+
+                    <div class="incubation-box">
+                        <div class="inc-icon">🤝</div>
+                        <div class="inc-content">
+                            <h5>Industry & Studio Networking</h5>
+                            <p>Facilitating corporate B2B introductions to Indian gaming studios and international XR venture syndicates.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grant-ask-box">
+                    <div style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--crimson-glow); letter-spacing: 0.15em;">
+                        INSTITUTIONAL SEED FUNDING ASK
+                    </div>
+                    <div class="grant-amount">
+                        ₹5,00,000 <span>- ₹10,00,000</span>
+                    </div>
+                    <p style="font-size: 0.82rem; color: #D0D0DE; line-height: 1.5;">
+                        Allocated strictly for XR developer testing hardware, legal IP patent drafting, and studio SDK pilot distribution.
+                    </p>
+                    <div style="background: rgba(0, 0, 0, 0.4); border: 1px solid var(--border-bright); padding: 12px; border-radius: 6px; font-size: 0.78rem; color: #FFF; line-height: 1.4;">
+                        <strong>Why Stereix Deserves Incubation:</strong><br>
+                        We are not pitching an unvalidated app idea. We have built a working deep-systems graphics engine with verified prototypes, addressing a multi-billion-dollar global entertainment bottleneck.
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Bottom Controls Deck -->
+    <div class="deck-controls">
+        <button class="btn-ctrl" onclick="prevSlide()" title="Previous Slide (Left Arrow)">◀</button>
+        <div class="slide-counter">
+            SLIDE <strong id="currentSlide">01</strong> / <span>07</span>
+        </div>
+        <button class="btn-ctrl" onclick="nextSlide()" title="Next Slide (Right Arrow or Space)">▶</button>
+        <button class="btn-text-action" id="toggleNotesBtn" onclick="toggleNotes()">SPEAKER SCRIPT [N]</button>
+        <button class="btn-text-action" onclick="toggleFullscreen()" title="Fullscreen (F)">FULLSCREEN [F]</button>
+        <button class="btn-text-action" onclick="window.print()" title="Print / Save to PDF">EXPORT PDF</button>
+    </div>
+
+    <!-- On-Screen Presenter Script Drawer (Toggle with 'N') -->
+    <div class="notes-drawer" id="notesDrawer">
+        <div class="notes-header">
+            <div class="notes-title" id="notesSlideTitle">SPEAKER TALKING POINTS // SLIDE 01</div>
+            <button onclick="toggleNotes()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1rem;">✕</button>
+        </div>
+        <div class="notes-body" id="notesContent">
+            Loading speaker script...
+        </div>
+    </div>
+
+    <script>
+        // Verbatim winning speaker scripts for each of the 7 slides
+        const speakerNotes = {
+            1: "<strong>Opening Pitch (30s):</strong> 'Good morning respected jury and mentors. We are presenting <strong>Stereix Engine</strong>, an enterprise B2B Graphics SDK and Zero-Code Runtime developed right here at J.N.N Institute of Engineering. Our product enables PC and console game studios to convert their existing flat blockbuster games into full 6DOF Virtual Reality in under 48 hours without modifying their original game engine or writing a single line of shader code. Today, we will show you how we solve a multi-billion dollar problem in spatial computing.'",
+            2: "<strong>The Problem (45s):</strong> 'Why does VR have millions of headsets gathering dust? Because of a $5M porting bottleneck. When a studio wants to bring a game like Sekiro or Elden Ring to VR, it traditionally takes 12 to 18 months, $2M to $5M in specialized graphics engineers, and massive financial risk. As a result, studios don't port their games. Gamers are starved of AAA content, and the VR hardware market is stalled. Existing consumer mods like VorpX cause severe nausea and take 2 hours to configure.'",
+            3: "<strong>The Product (45s):</strong> 'Stereix Engine solves this completely through our B2B SDK. We drop directly into the game's DirectX or Vulkan graphics pipeline using low-overhead GPU detours. We intercept the depth buffer and use DirectML AI neural inpainting on the render thread to synthesize the missing background pixels in under 1.5 milliseconds. We decouple 2D interfaces into a floating curved 3D HUD that eliminates eye strain, and deliver 90 frames per second straight to OpenXR headsets.'",
+            4: "<strong>Tech & Moat (45s):</strong> 'What makes us fundamentally different from hobbyist mod tools? Praydog UEVR is locked strictly to Unreal Engine—it cannot touch custom engines. LukeRoss uses alternating eye frames, which flickers and triggers acute motion sickness. Stereix is universal: we support custom proprietary engines like FromSoftware, Unity, and Decima. We render simultaneous stereoscopic dual-eyes at 90 FPS, and we deliver our technology as an enterprise-grade SDK for game studios.'",
+            5: "<strong>Business Model (45s):</strong> 'Our market is enormous. The global VR gaming market is expanding toward $32.4 Billion. We operate a high-margin B2B model: We charge studios a $25,000 DevKit licensing fee per title, plus a 5% royalty on all VR edition sales. For AAA studios, we provide enterprise custom co-development packages at $100,000+. With just 10 studio titles in Year 1, we project ₹80 Lakhs in revenue, scaling to ₹12.5 Crores by Year 3.'",
+            6: "<strong>Feasibility & Impact (45s):</strong> 'Most ideathon submissions are theoretical ideas on paper. Stereix Engine is already a functioning C++20 engine. We have passing 85 native unit tests and 17 automated regression gates, verified on titles like Sekiro. Our capital requirements are ultra-lean—under ₹5 Lakhs for test headsets and GPU development rigs. We reduce studio porting costs by 95% and turnaround time from 18 months to 48 hours.'",
+            7: "<strong>Ask & Incubation (30s):</strong> 'To take Stereix from functional prototype to commercial B2B market launch, we are seeking incubation under the JJISIC Foundation. We need support in filing Indian and international provisional patents for our DirectML depth inpainting architecture, Private Limited company incorporation under DBIT, and ₹5 to ₹10 Lakhs in seed grant funding for XR developer kits and studio outreach. Thank you, and we welcome your questions!'"
+        };
+
+        let current = 1;
+        const total = 7;
+        const slides = document.querySelectorAll('.slide');
+        const currentCounter = document.getElementById('currentSlide');
+        const progressIndicator = document.getElementById('progressIndicator');
+        const notesDrawer = document.getElementById('notesDrawer');
+        const notesContent = document.getElementById('notesContent');
+        const notesSlideTitle = document.getElementById('notesSlideTitle');
+        const toggleNotesBtn = document.getElementById('toggleNotesBtn');
+
+        function updateSlide(n) {
+            if (n < 1) n = 1;
+            if (n > total) n = total;
+            current = n;
+
+            slides.forEach((slide, idx) => {
+                slide.classList.toggle('active', (idx + 1) === current);
+            });
+
+            currentCounter.textContent = current < 10 ? '0' + current : current;
+            progressIndicator.style.width = ((current / total) * 100) + '%';
+
+            // Update speaker notes
+            notesSlideTitle.textContent = `SPEAKER TALKING POINTS // SLIDE 0${current}`;
+            notesContent.innerHTML = speakerNotes[current] || "No script available.";
+        }
+
+        function nextSlide() {
+            if (current < total) updateSlide(current + 1);
+        }
+
+        function prevSlide() {
+            if (current > 1) updateSlide(current - 1);
+        }
+
+        function toggleNotes() {
+            notesDrawer.classList.toggle('open');
+            toggleNotesBtn.classList.toggle('active');
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => alert(err.message));
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        // Keyboard Controls
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+                e.preventDefault();
+                nextSlide();
+            } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+                e.preventDefault();
+                prevSlide();
+            } else if (e.key === 'f' || e.key === 'F') {
+                e.preventDefault();
+                toggleFullscreen();
+            } else if (e.key === 'n' || e.key === 'N') {
+                e.preventDefault();
+                toggleNotes();
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                updateSlide(1);
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                updateSlide(total);
+            }
+        });
+
+        // Initialize Slide 1
+        updateSlide(1);
+
+        // Slide 5 Chart.js Initialization
+        window.addEventListener('load', () => {
+            try {
+                const ctx = document.getElementById('marketChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Year 1 (2027)', 'Year 2 (2028)', 'Year 3 (2029)'],
+                        datasets: [
+                            {
+                                label: 'Annual Revenue (₹ Crores)',
+                                data: [0.80, 3.20, 12.50],
+                                backgroundColor: 'rgba(220, 20, 60, 0.85)',
+                                borderColor: '#DC143C',
+                                borderWidth: 1,
+                                borderRadius: 4,
+                                order: 2
+                            },
+                            {
+                                label: 'Partner Studios Ported',
+                                data: [4, 18, 65],
+                                type: 'line',
+                                borderColor: '#06B6D4',
+                                backgroundColor: 'rgba(6, 182, 212, 0.2)',
+                                borderWidth: 2,
+                                pointBackgroundColor: '#06B6D4',
+                                pointRadius: 5,
+                                yAxisID: 'y1',
+                                order: 1,
+                                tension: 0.35
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                labels: {
+                                    color: '#A0A3B1',
+                                    font: { family: 'Inter', size: 11 }
+                                }
+                            },
+                            tooltip: {
+                                backgroundColor: '#0E0E14',
+                                borderColor: '#DC143C',
+                                borderWidth: 1,
+                                titleColor: '#FFF',
+                                bodyColor: '#D0D0DE'
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                                ticks: { color: '#9E9EA8', font: { family: 'JetBrains Mono', size: 10 } }
+                            },
+                            y: {
+                                title: { display: true, text: 'Revenue (₹ Cr)', color: '#DC143C' },
+                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                                ticks: { color: '#9E9EA8', font: { family: 'JetBrains Mono', size: 10 } }
+                            },
+                            y1: {
+                                position: 'right',
+                                title: { display: true, text: 'Studios Onboarded', color: '#06B6D4' },
+                                grid: { drawOnChartArea: false },
+                                ticks: { color: '#06B6D4', font: { family: 'JetBrains Mono', size: 10 } }
+                            }
+                        }
+                    }
+                });
+            } catch (err) {
+                console.error("Chart load error: ", err);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -8,8 +8,103 @@
 namespace NexVR {
 namespace AI {
 
+static void BilinearResizePlanarRGB(
+    const float* src, int srcW, int srcH,
+    float* dst, int dstW, int dstH)
+{
+    float scaleX = static_cast<float>(srcW) / static_cast<float>(dstW);
+    float scaleY = static_cast<float>(srcH) / static_cast<float>(dstH);
+
+    size_t srcPlane = static_cast<size_t>(srcW) * srcH;
+    size_t dstPlane = static_cast<size_t>(dstW) * dstH;
+
+    for (int c = 0; c < 3; ++c) {
+        const float* srcC = src + c * srcPlane;
+        float* dstC = dst + c * dstPlane;
+
+        for (int dy = 0; dy < dstH; ++dy) {
+            float sy = (dy + 0.5f) * scaleY - 0.5f;
+            int y0 = std::clamp(static_cast<int>(std::floor(sy)), 0, srcH - 1);
+            int y1 = std::clamp(y0 + 1, 0, srcH - 1);
+            float fy = sy - std::floor(sy);
+
+            for (int dx = 0; dx < dstW; ++dx) {
+                float sx = (dx + 0.5f) * scaleX - 0.5f;
+                int x0 = std::clamp(static_cast<int>(std::floor(sx)), 0, srcW - 1);
+                int x1 = std::clamp(x0 + 1, 0, srcW - 1);
+                float fx = sx - std::floor(sx);
+
+                float p00 = srcC[y0 * srcW + x0];
+                float p10 = srcC[y0 * srcW + x1];
+                float p01 = srcC[y1 * srcW + x0];
+                float p11 = srcC[y1 * srcW + x1];
+
+                float top = p00 + fx * (p10 - p00);
+                float bottom = p01 + fx * (p11 - p01);
+                dstC[dy * dstW + dx] = top + fy * (bottom - top);
+            }
+        }
+    }
+}
+
+static void BilinearResizeDepth(
+    const float* src, int srcW, int srcH,
+    float* dst, int dstW, int dstH)
+{
+    float scaleX = static_cast<float>(srcW) / static_cast<float>(dstW);
+    float scaleY = static_cast<float>(srcH) / static_cast<float>(dstH);
+
+    for (int dy = 0; dy < dstH; ++dy) {
+        float sy = (dy + 0.5f) * scaleY - 0.5f;
+        int y0 = std::clamp(static_cast<int>(std::floor(sy)), 0, srcH - 1);
+        int y1 = std::clamp(y0 + 1, 0, srcH - 1);
+        float fy = sy - std::floor(sy);
+
+        for (int dx = 0; dx < dstW; ++dx) {
+            float sx = (dx + 0.5f) * scaleX - 0.5f;
+            int x0 = std::clamp(static_cast<int>(std::floor(sx)), 0, srcW - 1);
+            int x1 = std::clamp(x0 + 1, 0, srcW - 1);
+            float fx = sx - std::floor(sx);
+
+            float p00 = src[y0 * srcW + x0];
+            float p10 = src[y0 * srcW + x1];
+            float p01 = src[y1 * srcW + x0];
+            float p11 = src[y1 * srcW + x1];
+
+            float top = p00 + fx * (p10 - p00);
+            float bottom = p01 + fx * (p11 - p01);
+            dst[dy * dstW + dx] = top + fy * (bottom - top);
+        }
+    }
+}
+
 MidasInpainter::MidasInpainter(bool useDirectML, int deviceId, const std::wstring& modelPath)
     : AiModelLoader(modelPath, useDirectML, deviceId) {
+    QueryModelDimensions();
+}
+
+void MidasInpainter::QueryModelDimensions() {
+    if (!m_session) return;
+    try {
+        auto typeInfo = m_session->GetInputTypeInfo(0);
+        auto tensorInfo = typeInfo.GetTensorTypeAndShapeInfo();
+        std::vector<int64_t> shape = tensorInfo.GetShape();
+        if (shape.size() >= 4) {
+            int64_t h = shape[2];
+            int64_t w = shape[3];
+            if (h > 0 && w > 0) {
+                m_modelInputHeight = static_cast<int>(h);
+                m_modelInputWidth = static_cast<int>(w);
+                m_hasStaticDimensions = true;
+            } else {
+                m_hasStaticDimensions = false;
+            }
+        }
+    } catch (...) {
+        m_modelInputHeight = 518;
+        m_modelInputWidth = 518;
+        m_hasStaticDimensions = true;
+    }
 }
 
 void MidasInpainter::ResetTemporalHistory() {
@@ -51,19 +146,39 @@ bool MidasInpainter::GenerateDepthMap(const float* rgbPlanar, float* outDepth, i
         ComputeHeuristicDepthFallback(rgbPlanar, outDepth, width, height);
     } else {
         try {
-            int64_t inputDims[4] = { 1, 3, height, width };
-            int64_t outputDims[4] = { 1, 1, height, width };
+            int inferW = m_hasStaticDimensions ? m_modelInputWidth : width;
+            int inferH = m_hasStaticDimensions ? m_modelInputHeight : height;
+            size_t inferPlaneSize = static_cast<size_t>(inferW) * inferH;
+
+            // Check if input frame requires dynamic scaling to match neural tensor
+            const float* inputBuffer = rgbPlanar;
+            std::vector<float> resizedInput;
+            bool needsResize = (width != inferW || height != inferH);
+
+            if (needsResize) {
+                resizedInput.resize(3 * inferPlaneSize);
+                BilinearResizePlanarRGB(rgbPlanar, width, height, resizedInput.data(), inferW, inferH);
+                inputBuffer = resizedInput.data();
+            }
+
+            // Output buffer for neural model
+            float* outputBuffer = outDepth;
+            std::vector<float> resizedOutput;
+            if (needsResize) {
+                resizedOutput.resize(inferPlaneSize);
+                outputBuffer = resizedOutput.data();
+            }
+
+            int64_t inputDims[4] = { 1, 3, inferH, inferW };
+            int64_t outputDims[4] = { 1, 1, inferH, inferW };
 
             Ort::MemoryInfo memInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
             Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
-                memInfo, const_cast<float*>(rgbPlanar), 3 * planeSize, inputDims, 4);
+                memInfo, const_cast<float*>(inputBuffer), 3 * inferPlaneSize, inputDims, 4);
 
             Ort::Value outputTensor = Ort::Value::CreateTensor<float>(
-                memInfo, outDepth, planeSize, outputDims, 4);
-
-            const char* inputNames[] = { "image", "input", "input_1" };
-            const char* outputNames[] = { "depth", "output", "output_1" };
+                memInfo, outputBuffer, inferPlaneSize, outputDims, 4);
 
             // Probe input and output names from the active model session
             Ort::AllocatorWithDefaultOptions allocator;
@@ -79,6 +194,11 @@ bool MidasInpainter::GenerateDepthMap(const float* rgbPlanar, float* outDepth, i
                 actualOutputNames, &outputTensor, 1
             );
 
+            // Upscale the neural depth map back to native width x height if scaled
+            if (needsResize) {
+                BilinearResizeDepth(resizedOutput.data(), inferW, inferH, outDepth, width, height);
+            }
+
             // Normalize neural disparity outputs into standard VR depth [0.05, 1.0]
             float minVal = outDepth[0];
             float maxVal = outDepth[0];
@@ -87,15 +207,14 @@ bool MidasInpainter::GenerateDepthMap(const float* rgbPlanar, float* outDepth, i
                 if (outDepth[i] > maxVal) maxVal = outDepth[i];
             }
             float range = maxVal - minVal;
-            if (range > 1e-5f) {
+            if (range > 0.05f) {
                 for (size_t i = 0; i < planeSize; ++i) {
                     float normDepth = (outDepth[i] - minVal) / range;
                     outDepth[i] = std::clamp(0.05f + 0.95f * normDepth, 0.05f, 1.0f);
                 }
             } else {
-                for (size_t i = 0; i < planeSize; ++i) {
-                    outDepth[i] = 0.5f;
-                }
+                // If neural depth is flat or has negligible dynamic range (e.g. untextured test pattern), blend in perspective/luminance prior
+                ComputeHeuristicDepthFallback(rgbPlanar, outDepth, width, height);
             }
         } catch (const Ort::Exception& ex) {
             std::cerr << "[Stereix DirectML Depth] Inference warning: " << ex.what() 

@@ -528,6 +528,21 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
         }
       }
 
+      // Proxy DLL Bootstrapping: Deploy dxgi.dll from proxy directory next to the game.
+      // This enables early, natural DLL loading on process creation, avoiding Win32 Error 5 (CreateRemoteThread blocked).
+      const proxySourceDir = path.join(canonicalBinSourceDir, 'proxy');
+      const proxyDxgi = path.join(proxySourceDir, 'dxgi.dll');
+      if (fs.existsSync(proxyDxgi)) {
+        for (const d of targetDirs) {
+          try {
+            fs.copyFileSync(proxyDxgi, path.join(d, 'dxgi.dll'));
+            console.info(`Deployed dxgi.dll proxy bootstrap to ${d}`);
+          } catch (e) {
+            console.warn(`Could not deploy dxgi.dll proxy to ${d} (may be locked by running game): ${e}`);
+          }
+        }
+      }
+
       // Ensure vrinject.json configuration is synchronized across all target binary directories
       const rootConfigPath = path.join(installPath, 'vrinject.json');
       let baseProfile: Record<string, any> = {};
@@ -839,17 +854,18 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
     const copySources = (!app.isPackaged ? [canonicalBinSourceDir, updatesDir] : [updatesDir, canonicalBinSourceDir])
       .filter(d => fs.existsSync(d)).join(';');
     const effectiveCopySrc = copySources || canonicalBinSourceDir;
+    const hotfixFlag = (!app.isPackaged || process.env.NODE_ENV === 'development') ? ' --allow-unverified-hotfix' : '';
     const innerScript =
       `$env:STEREIX_AUTH_TOKEN = '${escapePs(process.env.STEREIX_AUTH_TOKEN || '')}'; ` +
       `$env:NEXVR_AUTH_TOKEN = '${escapePs(process.env.NEXVR_AUTH_TOKEN || '')}'; ` +
       `& '${escapePs(cliSource)}' --pid ${targetPid} --dll '${escapePs(dllTarget)}' ` +
-      `--copy-src '${escapePs(effectiveCopySrc)}' --copy-dst '${escapePs(targetExeDir)}' ` +
+      `--copy-src '${escapePs(effectiveCopySrc)}' --copy-dst '${escapePs(targetExeDir)}'${hotfixFlag} ` +
       `*>&1 | Out-File -LiteralPath '${escapePs(logPath)}' -Append -Encoding utf8; ` +
       `if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
     const base64Inner = Buffer.from(innerScript, 'utf16le').toString('base64');
     const outerScript =
       `$p = Start-Process powershell -Verb RunAs -Wait -PassThru -WindowStyle Hidden ` +
-      `-ArgumentList "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", ` +
+      `-ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", ` +
       `"-EncodedCommand", "${base64Inner}"; ` +
       `if ($p.ExitCode -ne 0) { exit $p.ExitCode }`;
     const base64Outer = Buffer.from(outerScript, 'utf16le').toString('base64');
@@ -873,7 +889,7 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
 
       child_process.execFile(
         'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', base64Outer],
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', base64Outer],
         {
           timeout: 180000,
           killSignal: 'SIGKILL',
@@ -892,15 +908,19 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
         },
         (error) => {
           if (error) {
+            let cleanMsg = error.message;
+            if (cleanMsg.includes('-EncodedCommand')) {
+              cleanMsg = 'Injection process failed (Exit code non-zero). Check session log for root cause details.';
+            }
             sendDiscordTelemetry({
               gameId: validId,
               gameName: targetExeName || validId,
               status: 'error',
-              message: `Injection CLI failed: ${error.message}`,
+              message: `Injection CLI failed: ${cleanMsg}`,
               config: activeSessionConfig,
               logFilePath: currentSessionLogPath || latestSessionLogPath,
             }).catch(() => {});
-            finish({ success: false, message: `CLI failed: ${error.message}` });
+            finish({ success: false, message: cleanMsg });
           } else {
             activeSessionStartTime = Date.now();
             sendDiscordTelemetry({
@@ -1007,8 +1027,8 @@ ipcMain.handle('inject:uninstall', async (event, id: string) => {
       if (foundDir) targetExeDir = foundDir;
     }
 
-    // Remove deployed VR injection files
-    const filesToRemove = ['vrinject.dll', 'onnxruntime.dll', 'DirectML.dll', 'openxr_loader.dll', 'vrinject.log'];
+    // Remove deployed VR injection files (including proxy DLLs to restore 100% native flat screen)
+    const filesToRemove = ['dxgi.dll', 'd3d11.dll', 'vrinject.dll', 'onnxruntime.dll', 'DirectML.dll', 'openxr_loader.dll', 'vrinject.log'];
     let removedCount = 0;
     for (const f of filesToRemove) {
       const p = path.join(targetExeDir, f);

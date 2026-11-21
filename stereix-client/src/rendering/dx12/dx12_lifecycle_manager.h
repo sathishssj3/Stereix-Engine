@@ -37,6 +37,9 @@ public:
     // Releases references to swapchain backbuffer prior to ResizeBuffers
     void ReleaseSwapchainReferences();
 
+    // Resets and releases all swapchain COM references before swapchain recreation
+    void ResetSwapchain();
+
     // Marks swapchain for rebuild after ResizeBuffers completes
     void NotifyResizeComplete();
 

@@ -543,6 +543,25 @@ void OverlayManager::Render() {
 
                 ImGui::Spacing();
                 ImGui::Spacing();
+                ImGui::TextColored(ImVec4(0.00f, 0.85f, 1.00f, 1.0f), "Virtual Cinema Mode (6DOF)");
+                ImGui::Separator();
+
+                bool forceCinema = cfg.forceCinemaMode;
+                if (ImGui::Checkbox("Force Virtual Cinema Mode", &forceCinema)) {
+                    cfg.forceCinemaMode = forceCinema;
+                    cfgManager->Save();
+                }
+                ImGui::TextDisabled("Projects the 2D game onto an anchored 6DOF floating virtual cinema screen.");
+
+                if (ImGui::Button("Recenter Cinema Screen [F12 / Ctrl+Alt+R]")) {
+                    auto* fc = SubsystemContext::Get().GetFrameCoordinator();
+                    if (fc) {
+                        fc->RequestCinemaRecenter();
+                    }
+                }
+
+                ImGui::Spacing();
+                ImGui::Spacing();
                 ImGui::TextColored(ImVec4(0.00f, 0.85f, 1.00f, 1.0f), "Cutscene Auto-Theater");
                 ImGui::Separator();
 

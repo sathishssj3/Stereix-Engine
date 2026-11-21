@@ -27,6 +27,12 @@ public:
     void OnPresentBegin(const RenderFrameSnapshot& snapshot);
     void OnPresentEnd();
     
+    void ReleaseGraphicsResources() {
+        if (m_graphicsBackend) {
+            m_graphicsBackend->ReleaseResources();
+        }
+    }
+
     // Test hook for DX11 tests
     IGraphicsBackend* GetGraphicsBackend() { return m_graphicsBackend.get(); }
 
@@ -36,6 +42,12 @@ public:
                m_oxrRuntime->GetState() != openxr::RuntimeState::STOPPING &&
                m_oxrRuntime->GetState() != openxr::RuntimeState::STOPPED &&
                m_oxrRuntime->GetState() != openxr::RuntimeState::FAILED;
+    }
+
+    void RequestCinemaRecenter() {
+        if (m_oxrSubmitter) {
+            m_oxrSubmitter->RequestCinemaRecenter();
+        }
     }
 
 private:
@@ -66,6 +78,9 @@ private:
     
     // Cached headset pose from the previous frame to feed back into the engine
     XrPosef m_cachedHeadsetPose = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}};
+
+    // Tracks previous camera lock state to detect transitions and notify PageScanner
+    bool m_prevCameraLocked = false;
 };
 
 // RAII Guard to guarantee OnPresentEnd is fired

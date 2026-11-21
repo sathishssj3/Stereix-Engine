@@ -48,6 +48,9 @@ public:
     // Called by ResizeBuffers hook BEFORE the original call.
     // Releases all ComPtr references to swapchain buffers so ResizeBuffers can succeed.
     void ReleaseSwapchainReferences();
+
+    // Resets and releases all swapchain COM references before swapchain recreation
+    void ResetSwapchain();
     
     // Called by ResizeBuffers hook AFTER the original call succeeds.
     // Marks state for rebuild so backbuffer is re-acquired on next Present.

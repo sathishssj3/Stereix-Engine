@@ -15,6 +15,15 @@ namespace AI {
  * using hardware-accelerated DirectML ONNX models (e.g. MiDaS / Depth-Anything / DPT).
  * Includes temporal exponential smoothing (EMA) and edge-preserving bilateral filtering
  * to prevent stereo shimmer in VR headsets.
+ *
+ * Tensor contract: the shipped `models/depth_inpainter.onnx` is a real Depth Anything
+ * V2 Small (ViT-S, 24.8M params) exported with STATIC input `image` [1,3,518,518] and
+ * output `depth` [1,1,518,518] (see stereix-client/scripts/download_depth_anything_v2.py).
+ * GenerateDepthMap() currently forwards caller W*H straight to Ort::Run, so non-518x518
+ * frames raise an Ort::Exception and silently engage the heuristic depth fallback.
+ * When wiring this class into the live render path (neural_inpainter.cpp), first resize
+ * frames to 518x518 (or add an internal letterbox here) — ViT patch size 14 makes the
+ * model resolution-bound by design.
  */
 class MidasInpainter : public AiModelLoader {
 public:
@@ -69,6 +78,11 @@ private:
     int m_historyWidth{0};
     int m_historyHeight{0};
 
+    int m_modelInputWidth{518};
+    int m_modelInputHeight{518};
+    bool m_hasStaticDimensions{true};
+
+    void QueryModelDimensions();
     void ApplyBilateralFilter(const float* inputDepth, const float* rgbPlanar, float* outputDepth, int width, int height);
     void ApplyTemporalSmoothing(float* currentDepth, int width, int height);
     void ComputeHeuristicDepthFallback(const float* rgbPlanar, float* outDepth, int width, int height);

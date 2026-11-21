@@ -45,6 +45,9 @@ export interface VRConfig {
   performanceOverlay?:     boolean;
   hapticFeedback?:         boolean;
   aiInpainting?:           boolean;
+  convergence?:            number;
+  ipd?:                    number;
+  aiNotes?:                string;
 }
 
 export interface VRStatus {
@@ -86,3 +89,10 @@ export interface SystemHealthReport {
   checks: SystemCheckItem[];
   timestamp: string;
 }
+
+export interface AIProfileResponse {
+  profile: VRConfig & { id: string; name: string; aiNotes?: string };
+  source: 'local_ai' | 'cloud' | 'local_fallback';
+  reasoning?: string;
+}
+

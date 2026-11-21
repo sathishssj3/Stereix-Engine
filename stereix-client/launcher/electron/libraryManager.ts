@@ -435,7 +435,7 @@ ipcMain.handle('library:scan', async (event): Promise<{ active: GameEntry[], wai
 
   try {
     const regQuery = `reg query "HKCU\\Software\\Valve\\Steam" /v "SteamPath"`;
-    const regOut = child_process.execSync(regQuery, { encoding: 'utf-8' });
+    const regOut = child_process.execSync(regQuery, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
     const match = regOut.match(/SteamPath\s+REG_SZ\s+(.+)/i);
     if (!match) return { active: games, waiting: waitingGames };
     
@@ -698,7 +698,7 @@ ipcMain.handle('library:scan', async (event): Promise<{ active: GameEntry[], wai
 
       // Check registry for custom EA Desktop / Origin content path
       try {
-        const regOut = child_process.execSync('reg query "HKLM\\SOFTWARE\\Electronic Arts\\EA Desktop" /v "InstallDir"', { encoding: 'utf-8', timeout: 2000 });
+        const regOut = child_process.execSync('reg query "HKLM\\SOFTWARE\\Electronic Arts\\EA Desktop" /v "InstallDir"', { encoding: 'utf-8', timeout: 2000, stdio: ['pipe', 'pipe', 'ignore'] });
         const m = regOut.match(/InstallDir\s+REG_SZ\s+(.+)/i);
         if (m && m[1] && fs.existsSync(m[1].trim())) {
           const customEa = m[1].trim();

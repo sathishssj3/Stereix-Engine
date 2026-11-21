@@ -96,12 +96,14 @@ void CameraLockManager::Update(const CameraCandidate& bestCandidate, uint64_t cu
             break;
     }
 
+    // Frame sequence advances monotonically with each frame tick
+    m_snapshot.frame = currentFrame;
+
     if (hasCandidate && bestCandidate.id == m_lockedId) {
         m_lastSeenFrame = currentFrame;
         m_lockedConfidence = bestCandidate.confidence;
 
         // Update snapshot
-        m_snapshot.frame = currentFrame;
         m_snapshot.vp = bestCandidate.viewProjection;
         m_snapshot.projection = bestCandidate.projection;
         m_snapshot.view = bestCandidate.view;
@@ -123,6 +125,7 @@ void CameraLockManager::Update(const CameraCandidate& bestCandidate, uint64_t cu
 
 void CameraLockManager::SetResourceContext(const GraphicsResourceIdentity& identity) {
     m_resourceContext = identity;
+    m_snapshot.resourceIdentity = identity;
 }
 
 CameraSnapshot CameraLockManager::GetSnapshot() const {

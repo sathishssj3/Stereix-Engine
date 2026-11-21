@@ -389,6 +389,43 @@ test.describe('Cross-game isolation and profile safety regression tests', () => 
     const forgedManifest: UpdateManifest = { ...manifest, signature: forgedSignature };
     expect(verifyManifestSignature(forgedManifest)).toBe(false);
   });
+
+  test('v0.1.116 launcher seamless transition without clipping line sweeps or layout tearing', () => {
+    const appTsx = readRepoFile('launcher', 'src', 'App.tsx');
+    const indexCss = readRepoFile('launcher', 'src', 'index.css');
+
+    // 1. Sidebar game selection uses smooth opacity/scale transition instead of sharp clip-path sweep line
+    expect(indexCss).not.toContain('gameBannerSelectSweep');
+    expect(indexCss).toContain('gameBannerSelectFade');
+    expect(indexCss).not.toContain('clip-path: inset(0 100% 0 0)');
+
+    // 2. Synchronized game and config state update to prevent flashing stale configs
+    expect(appTsx).toContain('loadedConfigGameIdRef');
+    expect(appTsx).toContain('await window.ag.config.read(g.id)');
+  });
+
+  test('v0.1.117 two-stage AI calibration flow and in-terminal telemetry stream', () => {
+    const settingsPanelTsx = readRepoFile('launcher', 'src', 'components', 'SettingsPanel.tsx');
+    const vrStatusBarTsx = readRepoFile('launcher', 'src', 'components', 'VRStatusBar.tsx');
+    const appTsx = readRepoFile('launcher', 'src', 'App.tsx');
+
+    // 1. SettingsPanel removes manual reverse-engineer button & engine profile badge
+    expect(settingsPanelTsx).not.toContain('REVERSE-ENGINEER VR (LOCAL AI)');
+    expect(settingsPanelTsx).not.toContain('Calibrated Engine Profile:');
+    expect(settingsPanelTsx).toContain('RESET TO GLOBAL DEFAULTS');
+
+    // 2. VRStatusBar supports dynamic AI calibrating and START GAME button states
+    expect(vrStatusBarTsx).toContain('AI CALIBRATING');
+    expect(vrStatusBarTsx).toContain('START GAME');
+    expect(vrStatusBarTsx).toContain("injectState === 'ready'");
+
+    // 3. App.tsx implements dynamic 15-30s duration and AI process background streaming
+    expect(appTsx).toContain('computeCalibrationDuration');
+    expect(appTsx).toContain('startAICalibrationSequence');
+    expect(appTsx).toContain('cancelAICalibration');
+    expect(appTsx).toContain('Math.min(30, Math.max(15, sec))');
+    expect(appTsx).toContain('[AI-PROCESS] Initializing local neural reverse-engineering engine');
+  });
 });
 
 

@@ -12,24 +12,22 @@ namespace vrinject {
 
 bool ConfigManager::Load(const std::string& moduleDir, const std::string& explicitHostExeDir) {
     std::vector<std::string> candidatePaths;
-    
-    // 1. Check exact moduleDir
-    if (!moduleDir.empty()) {
-        std::string base = moduleDir;
-        if (base.back() == '\\' || base.back() == '/') base.pop_back();
-        candidatePaths.push_back(base + "\\vrinject.json");
-        
-        // Hierarchical parent directory searches (up to 3 levels up, e.g. Phoenix\Binaries\Win64 -> install root)
-        std::string cur = base;
+
+    auto addHierarchicalCandidates = [&candidatePaths](std::string dir) {
+        if (dir.empty()) return;
+        if (dir.back() == '\\' || dir.back() == '/') dir.pop_back();
+        candidatePaths.push_back(dir + "\\vrinject.json");
+        std::string cur = dir;
         for (int i = 0; i < 3; ++i) {
             size_t slash = cur.find_last_of("\\/");
             if (slash == std::string::npos || slash == 0) break;
             cur = cur.substr(0, slash);
             candidatePaths.push_back(cur + "\\vrinject.json");
         }
-    }
+    };
+    
+    addHierarchicalCandidates(moduleDir);
 
-    // 2. Check host process executable directory (e.g. Phoenix/Binaries/Win64/HogwartsLegacy.exe)
     std::string hostExeDir = explicitHostExeDir;
     std::string hostExeLower = "";
     if (hostExeDir.empty()) {
@@ -48,21 +46,8 @@ bool ConfigManager::Load(const std::string& moduleDir, const std::string& explic
         }
     }
 
-    if (!hostExeDir.empty()) {
-        if (hostExeDir.back() == '\\' || hostExeDir.back() == '/') hostExeDir.pop_back();
-        candidatePaths.push_back(hostExeDir + "\\vrinject.json");
-
-        // Hierarchical parent directory searches for host exe (up to 3 levels up)
-        std::string cur = hostExeDir;
-        for (int i = 0; i < 3; ++i) {
-            size_t slash = cur.find_last_of("\\/");
-            if (slash == std::string::npos || slash == 0) break;
-            cur = cur.substr(0, slash);
-            candidatePaths.push_back(cur + "\\vrinject.json");
-        }
-    }
+    addHierarchicalCandidates(hostExeDir);
     
-    // 3. User local appdata fallback (e.g. %LOCALAPPDATA%\VRInject\vrinject.json)
     char appData[MAX_PATH]{};
     if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appData))) {
         candidatePaths.push_back(std::string(appData) + "\\VRInject\\vrinject.json");
@@ -160,9 +145,10 @@ bool ConfigManager::Load(const std::string& moduleDir, const std::string& explic
         m_config.hudDistance = std::clamp(j.value("hudDistance", 1.8f), 0.5f, 10.0f);
         m_config.hudCurvature = std::clamp(j.value("hudCurvature", 0.35f), 0.0f, 1.0f);
 
-        // P1.1: Cutscene Auto-Theater
-        m_config.cutsceneTheater = j.value("cutsceneTheater", true);
-        m_config.theaterDistance = std::clamp(j.value("theaterDistance", 5.0f), 1.0f, 20.0f);
+        // P1.1: Cutscene Auto-Theater & Virtual Cinema
+        m_config.cutsceneTheater = j.value("cutsceneTheater", false);
+        m_config.forceCinemaMode = j.value("forceCinemaMode", false);
+        m_config.theaterDistance = std::clamp(j.value("theaterDistance", 2.5f), 1.0f, 20.0f);
         m_config.theaterCutThreshold = std::clamp(j.value("theaterCutThreshold", 120.0f), 30.0f, 360.0f);
 
         // P1.2: Comfort Vignette
@@ -225,8 +211,9 @@ bool ConfigManager::Save() {
         j["hudDistance"] = m_config.hudDistance;
         j["hudCurvature"] = m_config.hudCurvature;
 
-        // P1.1: Cutscene Auto-Theater
+        // P1.1: Cutscene Auto-Theater & Virtual Cinema
         j["cutsceneTheater"] = m_config.cutsceneTheater;
+        j["forceCinemaMode"] = m_config.forceCinemaMode;
         j["theaterDistance"] = m_config.theaterDistance;
         j["theaterCutThreshold"] = m_config.theaterCutThreshold;
 

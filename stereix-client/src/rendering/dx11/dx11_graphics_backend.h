@@ -15,6 +15,7 @@ public:
 
     bool Initialize(void* nativeDevice, void* nativeContext) override;
     void Shutdown() override;
+    void ReleaseResources() override;
 
     void SetState(StereoRendererState state) override;
     StereoRendererState GetState() const override;
@@ -65,6 +66,7 @@ private:
     DXGI_FORMAT m_targetFormat = DXGI_FORMAT_UNKNOWN;
     uint32_t m_targetWidth = 0;
     uint32_t m_targetHeight = 0;
+    bool m_lastRenderOk = false;
 };
 
 } // namespace vrinject

@@ -9,6 +9,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 #include <string>
 
 namespace vrinject {
@@ -43,6 +44,11 @@ public:
     static bool IsValidViewMatrixFloat(const float* mat);
     static bool IsValidViewMatrixDouble(const double* mat);
 
+    // Called by FrameCoordinator when camera tracking is locked/lost.
+    // These control the adaptive sleep to avoid 2+ GB memory bus contention.
+    void NotifyCameraLocked();
+    void NotifyCameraLost();
+
     PageScanner() = default;
     ~PageScanner() { StopDynamicScan(); }
 
@@ -57,12 +63,24 @@ private:
     
     void ScanDynamicHeaps();
 
+    // Returns true if the camera is locked (via external notification or CameraLockManager query)
+    bool IsCameraLocked() const;
+
     uint8_t* m_mainModuleBase = nullptr;
     size_t m_mainModuleSize = 0;
     float m_targetFov = 90.0f;
 
     std::thread m_scanThread;
     std::atomic<bool> m_scanRunning{false};
+
+    // Adaptive sleep: when camera is locked, scanner enters deep sleep (0 MB/s bus traffic).
+    // Woken by NotifyCameraLost() or StopDynamicScan().
+    std::atomic<bool> m_cameraLocked{false};
+    std::mutex m_sleepMutex;
+    std::condition_variable m_wakeCv;
+
+    // Completed sweep counter — after enough sweeps with a lock, scanner retires permanently.
+    std::atomic<uint32_t> m_completedSweeps{0};
 
     std::mutex m_candidatesMutex;
     std::vector<MemoryMatrixCandidate> m_cachedCandidates;

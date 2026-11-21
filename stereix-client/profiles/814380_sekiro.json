@@ -8,9 +8,10 @@
   "rowMajorMatrices": false,
   "matrixPrecision": "Float32",
   "motionAimSensitivity": 1,
+  "comfortVignette": false,
   "useRecommendedResolution": true,
   "srgbCorrection": true,
-  "depthSubmission": false,
+  "depthSubmission": true,
   "rawInputMode": true,
   "autoInjectOnLaunch": true
 }

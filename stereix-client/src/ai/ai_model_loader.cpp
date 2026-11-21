@@ -1,11 +1,13 @@
 #include "ai/ai_model_loader.h"
 #include <iostream>
+#include <filesystem>
 
 // Since we fetch content via CMake, we assume the headers are in include paths
 #include <onnxruntime_cxx_api.h>
 
 // DirectML execution provider
 #ifdef _WIN32
+#include <windows.h>
 #include <dml_provider_factory.h>
 #endif
 
@@ -68,12 +70,41 @@ void AiModelLoader::InitializeSession() {
         }
 #endif
 
+        // Resolve candidate model paths if m_modelPath does not exist directly
+        std::wstring candidatePath = m_modelPath;
+        if (!std::filesystem::exists(candidatePath)) {
+#ifdef _WIN32
+            wchar_t exePath[MAX_PATH] = { 0 };
+            if (GetModuleFileNameW(NULL, exePath, MAX_PATH)) {
+                std::filesystem::path exeDir = std::filesystem::path(exePath).parent_path();
+                std::filesystem::path baseName = std::filesystem::path(m_modelPath).filename();
+                std::vector<std::filesystem::path> candidates = {
+                    exeDir / m_modelPath,
+                    exeDir / "models" / baseName,
+                    exeDir / ".." / "models" / baseName,
+                    exeDir / ".." / ".." / "models" / baseName,
+                    exeDir / ".." / ".." / "stereix-client" / "models" / baseName,
+                    std::filesystem::current_path() / m_modelPath,
+                    std::filesystem::current_path() / "models" / baseName,
+                    std::filesystem::current_path() / "stereix-client" / "models" / baseName
+                };
+                for (const auto& c : candidates) {
+                    if (std::filesystem::exists(c)) {
+                        candidatePath = c.wstring();
+                        break;
+                    }
+                }
+            }
+#endif
+        }
+        m_modelPath = candidatePath;
+
         m_session = std::make_unique<Ort::Session>(*m_env, m_modelPath.c_str(), sessionOptions);
         
         // Default allocator
         m_memoryInfo = std::make_unique<Ort::MemoryInfo>(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault));
         
-        std::cout << "[NexVR AI] Successfully loaded model from: " << std::string(m_modelPath.begin(), m_modelPath.end()) << "\n";
+        std::cout << "[NexVR AI] Successfully loaded model from: " << std::filesystem::path(m_modelPath).string() << "\n";
     } catch (const Ort::Exception& e) {
         std::cerr << "[NexVR AI] Failed to load ONNX model (GPU initialization failed): " << e.what() << "\n";
         m_session.reset();

@@ -1,6 +1,8 @@
 #include "rendering/stereo/stereo_resource_manager.h"
 #include "core/logger.h"
+#include "core/seh_shield.h"
 #include <d3dcompiler.h>
+#include <vector>
 
 #pragma comment(lib, "d3dcompiler.lib")
 
@@ -52,6 +54,32 @@ DXGI_FORMAT DepthSrvFormat(DXGI_FORMAT format) {
     }
 }
 
+static bool SafeGetTextureDesc(ID3D11Texture2D* tex, D3D11_TEXTURE2D_DESC* outDesc) {
+    if (!tex || !outDesc) return false;
+    __try {
+        tex->GetDesc(outDesc);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+static const float* GetFallbackDepthRamp() {
+    static float s_ramp[256 * 256];
+    static bool s_inited = false;
+    if (!s_inited) {
+        for (uint32_t y = 0; y < 256; ++y) {
+            float normY = static_cast<float>(y) / 255.0f;
+            float val = 0.95f - 0.70f * normY;
+            for (uint32_t x = 0; x < 256; ++x) {
+                s_ramp[y * 256 + x] = val;
+            }
+        }
+        s_inited = true;
+    }
+    return s_ramp;
+}
+
 } // namespace
 
 void StereoResourceManager::ReleaseResources() {
@@ -80,9 +108,17 @@ bool StereoResourceManager::EnsureOneSourceView(
         Microsoft::WRL::ComPtr<ID3D11Texture2D>& shadow,
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& srv) {
     if (!device_ || !context || !source) return false;
+    if (!vrinject::seh::IsValidMemoryPointer(source)) return false;
 
     D3D11_TEXTURE2D_DESC srcDesc = {};
-    source->GetDesc(&srcDesc);
+    __try {
+        source->GetDesc(&srcDesc);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        LOG_WARN("StereoResourceManager: SEH intercepted accessing source texture %p (stale pointer).", source);
+        return false;
+    }
+
+    if (srcDesc.Width == 0 || srcDesc.Height == 0) return false;
 
     // MSAA sources need ResolveSubresource, not CopyResource. Rather than
     // silently produce a wrong image, decline and let the caller fall back.
@@ -134,7 +170,13 @@ bool StereoResourceManager::EnsureOneSourceView(
         }
     }
 
-    context->CopyResource(shadow.Get(), source);
+    __try {
+        context->CopyResource(shadow.Get(), source);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        LOG_WARN("StereoResourceManager: SEH intercepted CopyResource from %p (stale or freed source).", source);
+        return false;
+    }
+
     return srv != nullptr;
 }
 
@@ -149,21 +191,29 @@ bool StereoResourceManager::EnsureSourceViews(ID3D11DeviceContext* context,
         gameColorCopy_, gameColorSRV_);
 
     bool depthOk = false;
-    if (gameDepth) {
-        // Colour inherits its own format; depth needs the typeless/read pair.
+    if (gameDepth && vrinject::seh::IsValidMemoryPointer(gameDepth)) {
         D3D11_TEXTURE2D_DESC depthDesc = {};
-        gameDepth->GetDesc(&depthDesc);
-
-        depthOk = EnsureOneSourceView(
-            context, gameDepth,
-            TypelessDepthFormat(depthDesc.Format), DepthSrvFormat(depthDesc.Format),
-            gameDepthCopy_, gameDepthSRV_);
-    } else {
-        // Create 1x1 dummy depth texture if depth is not available yet (e.g. main menu)
+        if (SafeGetTextureDesc(gameDepth, &depthDesc)) {
+            depthOk = EnsureOneSourceView(
+                context, gameDepth,
+                TypelessDepthFormat(depthDesc.Format), DepthSrvFormat(depthDesc.Format),
+                gameDepthCopy_, gameDepthSRV_);
+        } else {
+            LOG_WARN("StereoResourceManager: SEH intercepted GetDesc on gameDepth %p", gameDepth);
+        }
+    }
+    
+    // Fallback: If depth buffer is not available or failed to lock safely,
+    // generate a synthetic perspective depth ramp so stereo pass can still render with realistic 3D depth
+    if (!depthOk) {
         if (!gameDepthCopy_ || !gameDepthSRV_) {
+            const uint32_t fbW = 256;
+            const uint32_t fbH = 256;
+            const float* fbData = GetFallbackDepthRamp();
+
             D3D11_TEXTURE2D_DESC dummyDesc = {};
-            dummyDesc.Width = 1;
-            dummyDesc.Height = 1;
+            dummyDesc.Width = fbW;
+            dummyDesc.Height = fbH;
             dummyDesc.MipLevels = 1;
             dummyDesc.ArraySize = 1;
             dummyDesc.Format = DXGI_FORMAT_R32_FLOAT;
@@ -171,8 +221,7 @@ bool StereoResourceManager::EnsureSourceViews(ID3D11DeviceContext* context,
             dummyDesc.Usage = D3D11_USAGE_DEFAULT;
             dummyDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
             
-            float farVal = 1.0f;
-            D3D11_SUBRESOURCE_DATA initData = { &farVal, sizeof(float), 0 };
+            D3D11_SUBRESOURCE_DATA initData = { fbData, fbW * sizeof(float), 0 };
             if (SUCCEEDED(device_->CreateTexture2D(&dummyDesc, &initData, &gameDepthCopy_))) {
                 device_->CreateShaderResourceView(gameDepthCopy_.Get(), nullptr, &gameDepthSRV_);
             }
@@ -240,14 +289,26 @@ bool StereoResourceManager::CreateRenderTargets(uint32_t width, uint32_t height,
 
     DXGI_FORMAT texFormat = format;
     DXGI_FORMAT uavFormat = format;
-    if (format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || format == DXGI_FORMAT_R8G8B8A8_UNORM || format == DXGI_FORMAT_R8G8B8A8_TYPELESS) {
+    if (format == DXGI_FORMAT_R8G8B8A8_UNORM) {
+        texFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        uavFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+    } else if (format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || format == DXGI_FORMAT_R8G8B8A8_TYPELESS) {
         texFormat = DXGI_FORMAT_R8G8B8A8_TYPELESS;
         uavFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-    } else if (format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB || format == DXGI_FORMAT_B8G8R8A8_UNORM || format == DXGI_FORMAT_B8G8R8A8_TYPELESS) {
+    } else if (format == DXGI_FORMAT_B8G8R8A8_UNORM) {
+        texFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+        uavFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+    } else if (format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB || format == DXGI_FORMAT_B8G8R8A8_TYPELESS) {
         texFormat = DXGI_FORMAT_B8G8R8A8_TYPELESS;
         uavFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+    } else if (format == DXGI_FORMAT_R10G10B10A2_UNORM || format == DXGI_FORMAT_R10G10B10A2_TYPELESS) {
+        texFormat = DXGI_FORMAT_R10G10B10A2_TYPELESS;
+        uavFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
+    } else if (format == DXGI_FORMAT_R16G16B16A16_FLOAT || format == DXGI_FORMAT_R16G16B16A16_TYPELESS) {
+        texFormat = DXGI_FORMAT_R16G16B16A16_TYPELESS;
+        uavFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
     } else if (format == DXGI_FORMAT_UNKNOWN) {
-        texFormat = DXGI_FORMAT_R8G8B8A8_TYPELESS;
+        texFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
         uavFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
     }
     desc.Format = texFormat;

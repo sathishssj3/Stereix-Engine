@@ -192,13 +192,17 @@ HRESULT ProcessPresentDX12(SwapChainType* pSwapChain, OriginalFunc originalFunc,
         // Get it from the swapchain.
         Microsoft::WRL::ComPtr<ID3D12CommandQueue> localQueue;
         ID3D12CommandQueue* pQueue = nullptr;
-        if (SUCCEEDED(pSwapChain->GetDevice(__uuidof(ID3D12CommandQueue), (void**)&localQueue))) {
+        if (SUCCEEDED(pSwapChain->GetDevice(__uuidof(ID3D12CommandQueue), (void**)&localQueue)) && localQueue) {
             pQueue = localQueue.Get();
         } else {
-            // Fallback for some wrappers that return ID3D12Device directly (technically invalid for swapchains, but happens)
-            Microsoft::WRL::ComPtr<ID3D12Device> localDevice;
-            if (SUCCEEDED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&localDevice))) {
-                LOG_WARN("DX12Hook: SwapChain->GetDevice returned Device instead of CommandQueue! We need a queue.");
+            // Fallback to captured command queue if GetDevice doesn't directly return the queue
+            localQueue = DXGIFactoryHook::GetCapturedCommandQueue();
+            pQueue = localQueue.Get();
+            if (!pQueue) {
+                Microsoft::WRL::ComPtr<ID3D12Device> localDevice;
+                if (SUCCEEDED(pSwapChain->GetDevice(__uuidof(ID3D12Device), (void**)&localDevice))) {
+                    LOG_WARN("DX12Hook: SwapChain->GetDevice returned Device instead of CommandQueue! We need a queue.");
+                }
             }
         }
         
@@ -232,7 +236,12 @@ HRESULT ProcessPresentDX12(SwapChainType* pSwapChain, OriginalFunc originalFunc,
 }
 
 static HRESULT hkPresentDX12Internal(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
-    return ProcessPresentDX12(pSwapChain, OriginalPresentDX12, SyncInterval, Flags);
+    UINT effectiveSyncInterval = SyncInterval;
+    auto* coordinator = SubsystemContext::Get().GetFrameCoordinator();
+    if (coordinator && coordinator->IsOpenXRReady()) {
+        effectiveSyncInterval = 0; // Decouple from 60 Hz monitor VSync so OpenXR runs at full 90 Hz
+    }
+    return ProcessPresentDX12(pSwapChain, OriginalPresentDX12, effectiveSyncInterval, Flags);
 }
 
 HRESULT __stdcall hkPresentDX12(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
@@ -246,7 +255,12 @@ HRESULT __stdcall hkPresentDX12(IDXGISwapChain* pSwapChain, UINT SyncInterval, U
 }
 
 static HRESULT hkPresent1DX12Internal(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters) {
-    return ProcessPresentDX12(pSwapChain, OriginalPresent1DX12, SyncInterval, PresentFlags, pPresentParameters);
+    UINT effectiveSyncInterval = SyncInterval;
+    auto* coordinator = SubsystemContext::Get().GetFrameCoordinator();
+    if (coordinator && coordinator->IsOpenXRReady()) {
+        effectiveSyncInterval = 0; // Decouple from 60 Hz monitor VSync so OpenXR runs at full 90 Hz
+    }
+    return ProcessPresentDX12(pSwapChain, OriginalPresent1DX12, effectiveSyncInterval, PresentFlags, pPresentParameters);
 }
 
 HRESULT __stdcall hkPresent1DX12(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters) {
@@ -328,9 +342,11 @@ void __stdcall hkCopyDescriptorsSimple(ID3D12Device* pDevice, UINT NumDescriptor
 
 static void hkExecuteCommandListsInternal(ID3D12CommandQueue* pCommandQueue, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists) {
     if (pCommandQueue && vrinject::seh::IsValidMemoryPointer(pCommandQueue)) {
-        D3D12_COMMAND_QUEUE_DESC desc = pCommandQueue->GetDesc();
-        if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
-            DXGIFactoryHook::SetCapturedCommandQueue(pCommandQueue);
+        if (!DXGIFactoryHook::GetCapturedCommandQueue().Get()) {
+            D3D12_COMMAND_QUEUE_DESC desc = pCommandQueue->GetDesc();
+            if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
+                DXGIFactoryHook::SetCapturedCommandQueue(pCommandQueue);
+            }
         }
     }
     if (OriginalExecuteCommandLists) {
@@ -570,7 +586,7 @@ bool Initialize() {
         }
         char modName[MAX_PATH] = {};
         GetModuleFileNameA(hMod, modName, MAX_PATH);
-        // Only allow hooks into known Microsoft D3D/DXGI system DLLs.
+        // Only allow hooks into known Microsoft D3D/DXGI system DLLs, or legitimate vendor interposers.
         std::string path(modName);
         // Extract filename from path
         size_t lastSlash = path.find_last_of("\\/");
@@ -578,6 +594,25 @@ bool Initialize() {
         auto toLower = [](std::string s) { for (auto& c : s) c = (char)tolower(c); return s; };
         std::string filenameLower = toLower(filename);
         std::string pathLower = toLower(path);
+
+        // Legitimate vendor interposers (e.g. NVIDIA Streamline framework used by Ghost of Tsushima, Spider-Man, etc.)
+        if (filenameLower == "sl.interposer.dll") {
+            char exePath[MAX_PATH] = {};
+            if (GetModuleFileNameA(NULL, exePath, MAX_PATH)) {
+                std::string exeDir(exePath);
+                size_t exeSlash = exeDir.find_last_of("\\/");
+                if (exeSlash != std::string::npos) {
+                    exeDir = exeDir.substr(0, exeSlash + 1);
+                }
+                std::string exeDirLower = toLower(exeDir);
+                if (pathLower.rfind(exeDirLower, 0) == 0 && GetProcAddress(hMod, "slInit") != nullptr) {
+                    LOG_INFO("DX12Hook: Verified legitimate NVIDIA Streamline interposer at '%s'. Allowing hook target.", modName);
+                    return true;
+                }
+            }
+            LOG_WARN("DX12Hook: Found 'sl.interposer.dll' at '%s' but failed validation against application directory — skipping.", modName);
+            return false;
+        }
         
         // Exact matches for known system DLLs (case-insensitive)
         if (filenameLower != "d3d12.dll" &&
@@ -593,6 +628,23 @@ bool Initialize() {
         if (GetSystemDirectoryA(sysDir, MAX_PATH)) {
             std::string sysPathLower = toLower(sysDir);
             if (pathLower.rfind(sysPathLower, 0) != 0) {
+                // Check if this is Microsoft Agility SDK D3D12Core.dll located within the game directory
+                if (filenameLower == "d3d12core.dll") {
+                    char exePath[MAX_PATH] = {};
+                    if (GetModuleFileNameA(NULL, exePath, MAX_PATH)) {
+                        std::string exeDir(exePath);
+                        size_t exeSlash = exeDir.find_last_of("\\/");
+                        if (exeSlash != std::string::npos) {
+                            exeDir = exeDir.substr(0, exeSlash + 1);
+                        }
+                        std::string exeDirLower = toLower(exeDir);
+                        if (pathLower.rfind(exeDirLower, 0) == 0 &&
+                            (GetProcAddress(hMod, "D3D12SDKVersion") != nullptr || GetProcAddress(hMod, "D3D12GetInterface") != nullptr)) {
+                            LOG_INFO("DX12Hook: Verified Microsoft Agility SDK '%s' at '%s'. Allowing hook target.", filename.c_str(), modName);
+                            return true;
+                        }
+                    }
+                }
                 LOG_WARN("DX12Hook: Hook target %p resides in '%s', which is outside Windows system directory '%s' — skipping.", addr, modName, sysDir);
                 return false;
             }

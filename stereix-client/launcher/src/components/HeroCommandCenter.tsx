@@ -1,4 +1,5 @@
 import type { GameEntry, VRStatus } from '../types';
+import stereixLogo from '../assets/logo_1_1.png';
 
 interface HeroCommandCenterProps {
   games: GameEntry[];
@@ -43,21 +44,19 @@ export function HeroCommandCenter({
             padding: '48px 24px'
           }}
         >
-          <div style={{
-            width: 48,
-            height: 48,
-            borderRadius: 10,
-            background: '#0B0B0E',
-            border: '1px solid #2C2D35',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 16,
-            color: 'var(--ag-accent)',
-            fontSize: 20
-          }}>
-            ◈
-          </div>
+          <img
+            src={stereixLogo}
+            alt="Stereix Engine"
+            style={{
+              width: 56,
+              height: 56,
+              objectFit: 'contain',
+              marginBottom: 16,
+              userSelect: 'none',
+              filter: 'drop-shadow(0 2px 10px rgba(255, 30, 45, 0.25))'
+            }}
+            draggable={false}
+          />
           <div style={{
             fontSize: 16,
             fontWeight: 800,

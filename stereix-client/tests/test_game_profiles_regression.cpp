@@ -117,7 +117,7 @@ TEST_F(GameProfilesRegressionTest, AppID_814380_StereoAndPrecisionInvariant) {
         "reverseZ": false,
         "rowMajorMatrices": false,
         "matrixPrecision": "Float32",
-        "depthSubmission": false
+        "depthSubmission": true
     })";
     outFile.close();
 

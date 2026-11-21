@@ -9,6 +9,9 @@ namespace DX11Hook {
 
     // Cleans up hooks and releases COM resources
     void Shutdown();
+
+    // Invalidates cached swapchain probe states on swapchain recreation
+    void InvalidateCachedSwapchain();
 }
 
 } // namespace vrinject

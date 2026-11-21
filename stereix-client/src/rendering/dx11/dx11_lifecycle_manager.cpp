@@ -59,6 +59,13 @@ RenderFrameSnapshot Dx11LifecycleManager::ProcessPresent(IDXGISwapChain* swapCha
         }
     }
 
+    if (m_swapchainResources.swapChain && m_state.load(std::memory_order_relaxed) == RenderState::RUNNING) {
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> currentBuf;
+        if (SUCCEEDED(m_swapchainResources.swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&currentBuf)) && currentBuf) {
+            m_swapchainResources.backBuffer = currentBuf;
+        }
+    }
+
     return CreateSnapshot();
 }
 
@@ -287,6 +294,26 @@ void Dx11LifecycleManager::ReleaseSwapchainReferences() {
     }
 
     LOG_INFO("Dx11LifecycleManager: Released swapchain references for ResizeBuffers");
+}
+
+void Dx11LifecycleManager::ResetSwapchain() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_swapchainResources.swapChain && !m_swapchainResources.backBuffer && !m_swapchainResources.rtv) {
+        return;
+    }
+    LOG_INFO("Dx11LifecycleManager: Resetting swapchain resources (swapChain=%p).", m_swapchainResources.swapChain.Get());
+    m_swapchainResources.backBuffer.Reset();
+    m_swapchainResources.rtv.Reset();
+    if (m_deviceResources.immediateContext) {
+        m_deviceResources.immediateContext->ClearState();
+        m_deviceResources.immediateContext->Flush();
+    }
+    m_swapchainResources.swapChain.Reset();
+    m_swapchainResources.width = 0;
+    m_swapchainResources.height = 0;
+    m_swapchainResources.format = DXGI_FORMAT_UNKNOWN;
+    m_state.store(RenderState::UNINITIALIZED, std::memory_order_release);
+    LOG_INFO("Dx11LifecycleManager: Swapchain resources released completely.");
 }
 
 void Dx11LifecycleManager::NotifyResizeComplete() {

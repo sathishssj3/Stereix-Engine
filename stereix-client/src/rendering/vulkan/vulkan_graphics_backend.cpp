@@ -731,6 +731,31 @@ void VulkanGraphicsBackend::SubmitStereoFrame(
             }
             } // end if (!stereoOk)
 
+            // Handle floating HUD quad submission if UI layer is detected
+            if (uiMaskHandle && oxrSwapchain && oxrSwapchain->GetHudSwapchain() != XR_NULL_HANDLE) {
+                uint32_t hudImageIndex = 0;
+                if (oxrSwapchain->AcquireHudImage(hudImageIndex)) {
+                    if (oxrSwapchain->WaitHudImage()) {
+                        oxrSwapchain->ReleaseHudImage();
+                        oxrSubmitter->SetHudQuad(oxrSwapchain->GetHudSwapchain(), currentSnapshot.width, currentSnapshot.height);
+                    }
+                }
+            } else {
+                oxrSubmitter->ClearHudQuad();
+            }
+
+            bool isCinema = false;
+            float cinemaDist = 2.5f;
+            const auto* cfgMgr = SubsystemContext::Get().GetConfig();
+            if (cfgMgr) {
+                const auto& cfg = cfgMgr->GetConfig();
+                if (cfg.forceCinemaMode) isCinema = true;
+                if (cfg.theaterDistance >= 1.0f) cinemaDist = cfg.theaterDistance;
+            }
+            float submitW = (oxrSwapchain && oxrSwapchain->GetWidth() > 0) ? static_cast<float>(oxrSwapchain->GetWidth()) : static_cast<float>(currentSnapshot.width);
+            float submitH = (oxrSwapchain && oxrSwapchain->GetHeight() > 0) ? static_cast<float>(oxrSwapchain->GetHeight()) : static_cast<float>(currentSnapshot.height);
+            oxrSubmitter->SetCinemaQuad(isCinema, cinemaDist, submitW, submitH);
+
             oxrSubmitter->ReleaseAndEndVulkan(
                 xrRuntime->GetSession(), xrRuntime->GetReferenceSpace(),
                 oxrSwapchain, currentSnapshot.width,

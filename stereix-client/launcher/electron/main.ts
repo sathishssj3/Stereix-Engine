@@ -239,6 +239,7 @@ import './configManager';
 import './injectionManager';
 import './diagnosticsManager';
 import './systemDoctor';
+import './aiProfileService';
 import { checkForEngineHotfix } from './updateManager';
 
 // Native Window Controls Handler

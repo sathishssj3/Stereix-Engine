@@ -188,6 +188,40 @@ void Dx12LifecycleManager::ReleaseSwapchainReferences() {
     LOG_INFO("Dx12LifecycleManager: Released swapchain backbuffer reference for ResizeBuffers (GPU idle verified).");
 }
 
+void Dx12LifecycleManager::ResetSwapchain() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_swapchainResources.swapChain && !m_swapchainResources.backBuffer) {
+        return;
+    }
+    LOG_INFO("Dx12LifecycleManager: Resetting swapchain resources (swapChain=%p, backBuffer=%p).",
+             m_swapchainResources.swapChain.Get(), m_swapchainResources.backBuffer.Get());
+
+    // Drain direct command queue before releasing backbuffer to ensure GPU is done with buffers
+    if (m_deviceResources.commandQueue && m_deviceResources.device) {
+        Microsoft::WRL::ComPtr<ID3D12Fence> fence;
+        if (SUCCEEDED(m_deviceResources.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)))) {
+            HANDLE fenceEvent = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            if (fenceEvent) {
+                if (SUCCEEDED(m_deviceResources.commandQueue->Signal(fence.Get(), 1))) {
+                    if (fence->GetCompletedValue() < 1) {
+                        fence->SetEventOnCompletion(1, fenceEvent);
+                        ::WaitForSingleObject(fenceEvent, 2000);
+                    }
+                }
+                ::CloseHandle(fenceEvent);
+            }
+        }
+    }
+
+    m_swapchainResources.backBuffer.Reset();
+    m_swapchainResources.swapChain.Reset();
+    m_swapchainResources.width = 0;
+    m_swapchainResources.height = 0;
+    m_swapchainResources.format = DXGI_FORMAT_UNKNOWN;
+    m_state.store(RenderState::UNINITIALIZED, std::memory_order_release);
+    LOG_INFO("Dx12LifecycleManager: Swapchain resources released completely.");
+}
+
 void Dx12LifecycleManager::NotifyResizeComplete() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_state.store(RenderState::RESIZE_PENDING, std::memory_order_release);

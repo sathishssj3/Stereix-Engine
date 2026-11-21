@@ -1,5 +1,6 @@
 #include "openxr/openxr_frame_submitter.h"
 #include "core/logger.h"
+#include "core/seh_shield.h"
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -10,6 +11,131 @@ namespace openxr {
 
 OpenXRFrameSubmitter::OpenXRFrameSubmitter(OpenXRHealthMonitor* healthMonitor)
     : healthMonitor_(healthMonitor) {}
+
+OpenXRFrameSubmitter::~OpenXRFrameSubmitter() {
+    StopPacingThread();
+}
+
+void OpenXRFrameSubmitter::EnsurePacingThreadRunning(XrSession session) {
+    if (!session || session == XR_NULL_HANDLE) return;
+    
+    if (pacingSession_ != session || !pacingRunning_.load()) {
+        StopPacingThread();
+        
+        std::lock_guard<std::mutex> lock(pacingMutex_);
+        pacingSession_ = session;
+        pacingRunning_.store(true);
+        pacingWaitRequested_ = true; // Request immediate wait for first frame
+        pacingFrameReady_ = false;
+        pacingThread_ = std::thread(&OpenXRFrameSubmitter::PacingThreadLoop, this);
+    }
+}
+
+void OpenXRFrameSubmitter::StopPacingThread() {
+    {
+        std::lock_guard<std::mutex> lock(pacingMutex_);
+        pacingRunning_.store(false);
+        pacingWaitRequested_ = false;
+        pacingSession_ = XR_NULL_HANDLE;
+    }
+    cvPacingRequest_.notify_all();
+    cvPacingReady_.notify_all();
+    if (pacingThread_.joinable()) {
+        pacingThread_.join();
+    }
+}
+
+void OpenXRFrameSubmitter::PacingThreadLoop() {
+    while (pacingRunning_.load()) {
+        XrSession session = XR_NULL_HANDLE;
+        {
+            std::unique_lock<std::mutex> lock(pacingMutex_);
+            cvPacingRequest_.wait(lock, [this]() {
+                return !pacingRunning_.load() || pacingWaitRequested_;
+            });
+            if (!pacingRunning_.load()) break;
+            session = pacingSession_;
+            pacingWaitRequested_ = false;
+        }
+
+        if (session != XR_NULL_HANDLE) {
+            XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
+            XrFrameState frameState{XR_TYPE_FRAME_STATE};
+            XrResult res = xrWaitFrame(session, &waitInfo, &frameState);
+
+            {
+                std::lock_guard<std::mutex> lock(pacingMutex_);
+                if (XR_SUCCEEDED(res)) {
+                    pacingFrameState_ = frameState;
+                    pacingFrameReady_ = true;
+                } else {
+                    pacingFrameReady_ = false;
+                }
+            }
+            cvPacingReady_.notify_all();
+        }
+    }
+}
+
+bool OpenXRFrameSubmitter::ConsumePacedFrameState(XrSession session, XrFrameState& outFrameState) {
+    std::unique_lock<std::mutex> lock(pacingMutex_);
+    if (!pacingRunning_.load()) return false;
+
+    if (!pacingFrameReady_) {
+        // Wait up to 16ms for the pacing thread to complete xrWaitFrame
+        cvPacingReady_.wait_for(lock, std::chrono::milliseconds(16), [this]() {
+            return pacingFrameReady_ || !pacingRunning_.load();
+        });
+    }
+
+    if (pacingFrameReady_) {
+        outFrameState = pacingFrameState_;
+        pacingFrameReady_ = false;
+        return true;
+    }
+    return false;
+}
+
+void OpenXRFrameSubmitter::TriggerNextPacingWait(XrSession session) {
+    {
+        std::lock_guard<std::mutex> lock(pacingMutex_);
+        pacingSession_ = session;
+        pacingWaitRequested_ = true;
+    }
+    cvPacingRequest_.notify_one();
+}
+
+bool OpenXRFrameSubmitter::WaitAndBeginFrame(XrSession session) {
+    EnsurePacingThreadRunning(session);
+
+    XrFrameState frameState{XR_TYPE_FRAME_STATE};
+    bool gotPacedState = ConsumePacedFrameState(session, frameState);
+    if (!gotPacedState) {
+        // Synchronous fallback if pacing thread hasn't returned
+        state_ = SubmitterState::WAIT_FRAME;
+        XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
+        XrResult res = xrWaitFrame(session, &waitInfo, &frameState);
+        if (XR_FAILED(res)) {
+            if (healthMonitor_) healthMonitor_->RecordFrameDropped();
+            return false;
+        }
+    }
+
+    currentFrameState_ = frameState;
+
+    state_ = SubmitterState::BEGIN_FRAME;
+    XrFrameBeginInfo beginInfo{XR_TYPE_FRAME_BEGIN_INFO};
+    XrResult res = xrBeginFrame(session, &beginInfo);
+    if (XR_FAILED(res)) {
+        if (healthMonitor_) healthMonitor_->RecordFrameDropped();
+        return false;
+    }
+
+    // Immediately trigger background pacing for the NEXT frame now that xrBeginFrame has been called
+    TriggerNextPacingWait(session);
+
+    return true;
+}
 
 bool OpenXRFrameSubmitter::LocateViews(XrSession session, XrSpace referenceSpace, 
                                        XrPosef& outLeftPose, XrFovf& outLeftFov,
@@ -55,23 +181,7 @@ bool OpenXRFrameSubmitter::BeginAndAcquireDX11(
     XrPosef& outLeftPose, XrFovf& outLeftFov,
     XrPosef& outRightPose, XrFovf& outRightFov) 
 {
-    // 1. Wait Frame
-    state_ = SubmitterState::WAIT_FRAME;
-    XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
-    XrResult res = xrWaitFrame(session, &waitInfo, &currentFrameState_);
-    if (XR_FAILED(res)) {
-        if (healthMonitor_) healthMonitor_->RecordFrameDropped();
-        return false;
-    }
-
-    // 2. Begin Frame
-    state_ = SubmitterState::BEGIN_FRAME;
-    XrFrameBeginInfo beginInfo{XR_TYPE_FRAME_BEGIN_INFO};
-    res = xrBeginFrame(session, &beginInfo);
-    if (XR_FAILED(res)) {
-        if (healthMonitor_) healthMonitor_->RecordFrameDropped();
-        return false;
-    }
+    if (!WaitAndBeginFrame(session)) return false;
 
     if (!currentFrameState_.shouldRender) {
         // App is not in focus or visible
@@ -160,29 +270,52 @@ bool OpenXRFrameSubmitter::ReleaseAndEndDX11(
 
     auto copyEye = [&](ID3D11Texture2D* src, ID3D11Texture2D* dst, const char* eyeName) {
         if (!src || !dst) return;
+        if (!vrinject::seh::IsValidMemoryPointer(src) || !vrinject::seh::IsValidMemoryPointer(dst)) return;
+
         D3D11_TEXTURE2D_DESC srcDesc = {};
         D3D11_TEXTURE2D_DESC dstDesc = {};
-        src->GetDesc(&srcDesc);
-        dst->GetDesc(&dstDesc);
+        __try {
+            src->GetDesc(&srcDesc);
+            dst->GetDesc(&dstDesc);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            LOG_WARN("OpenXRFrameSubmitter: SEH intercepted GetDesc on %s", eyeName);
+            return;
+        }
+
         bool compatible = (srcDesc.Format == dstDesc.Format) || AreD3D11FormatsCompatible(srcDesc.Format, dstDesc.Format);
-        if (compatible && srcDesc.Width == dstDesc.Width && srcDesc.Height == dstDesc.Height) {
-            context->CopyResource(dst, src);
-        } else if (compatible) {
-            D3D11_BOX box;
-            box.left = 0;
-            box.top = 0;
-            box.front = 0;
-            box.right = (std::min)(srcDesc.Width, dstDesc.Width);
-            box.bottom = (std::min)(srcDesc.Height, dstDesc.Height);
-            box.back = 1;
-            context->CopySubresourceRegion(dst, 0, 0, 0, 0, src, 0, &box);
-        } else {
-            static bool s_loggedFormatMismatch = false;
-            if (!s_loggedFormatMismatch) {
-                LOG_ERROR("OpenXRFrameSubmitter: D3D11 copy failed on %s! Incompatible format family (src format %u != dst format %u)",
-                          eyeName, srcDesc.Format, dstDesc.Format);
-                s_loggedFormatMismatch = true;
+        __try {
+            if (compatible && srcDesc.Width == dstDesc.Width && srcDesc.Height == dstDesc.Height) {
+                if (srcDesc.Format == dstDesc.Format) {
+                    context->CopyResource(dst, src);
+                } else {
+                    D3D11_BOX box;
+                    box.left = 0;
+                    box.top = 0;
+                    box.front = 0;
+                    box.right = srcDesc.Width;
+                    box.bottom = srcDesc.Height;
+                    box.back = 1;
+                    context->CopySubresourceRegion(dst, 0, 0, 0, 0, src, 0, &box);
+                }
+            } else if (compatible) {
+                D3D11_BOX box;
+                box.left = 0;
+                box.top = 0;
+                box.front = 0;
+                box.right = (std::min)(srcDesc.Width, dstDesc.Width);
+                box.bottom = (std::min)(srcDesc.Height, dstDesc.Height);
+                box.back = 1;
+                context->CopySubresourceRegion(dst, 0, 0, 0, 0, src, 0, &box);
+            } else {
+                static bool s_loggedFormatMismatch = false;
+                if (!s_loggedFormatMismatch) {
+                    LOG_ERROR("OpenXRFrameSubmitter: D3D11 copy failed on %s! Incompatible format family (src format %u != dst format %u)",
+                              eyeName, srcDesc.Format, dstDesc.Format);
+                    s_loggedFormatMismatch = true;
+                }
             }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            LOG_WARN("OpenXRFrameSubmitter: SEH intercepted CopyResource/CopySubresourceRegion on %s", eyeName);
         }
     };
 
@@ -231,14 +364,52 @@ bool OpenXRFrameSubmitter::ReleaseAndEndDX11(
     layer.viewCount = 2;
     layer.views = projectionViews;
 
-    const XrCompositionLayerBaseHeader* const layers[] = {
-        reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer)
-    };
+    XrCompositionLayerQuad quadLayer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    XrCompositionLayerQuad cinemaLayer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    const XrCompositionLayerBaseHeader* layers[2];
+    uint32_t layerCount = 1;
+
+    if (cinemaQuadConfig_.enabled) {
+        if (cinemaQuadConfig_.needsRecenter) {
+            RecenterCinemaQuad(lastLeftPose_);
+            cinemaQuadConfig_.needsRecenter = false;
+        }
+
+        cinemaLayer.layerFlags = 0; // Opaque layer
+        cinemaLayer.space = referenceSpace;
+        cinemaLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        cinemaLayer.subImage.swapchain = swapchainManager->GetLeftSwapchain();
+        cinemaLayer.subImage.imageArrayIndex = 0;
+        cinemaLayer.subImage.imageRect.offset = {0, 0};
+        cinemaLayer.subImage.imageRect.extent = extentOf(leftDest);
+        cinemaLayer.pose = cinemaQuadConfig_.pose;
+        cinemaLayer.size = {cinemaQuadConfig_.sizeX, cinemaQuadConfig_.sizeY};
+
+        layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&cinemaLayer);
+    } else {
+        layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer);
+    }
+
+    if (hudQuadConfig_.enabled && hudQuadConfig_.swapchain != XR_NULL_HANDLE) {
+        quadLayer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        quadLayer.space = referenceSpace;
+        quadLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        quadLayer.subImage.swapchain = hudQuadConfig_.swapchain;
+        quadLayer.subImage.imageArrayIndex = 0;
+        quadLayer.subImage.imageRect.offset = {0, 0};
+        quadLayer.subImage.imageRect.extent.width = hudQuadConfig_.width;
+        quadLayer.subImage.imageRect.extent.height = hudQuadConfig_.height;
+        quadLayer.pose = hudQuadConfig_.pose;
+        quadLayer.size = hudQuadConfig_.size;
+
+        layers[1] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quadLayer);
+        layerCount = 2;
+    }
 
     XrFrameEndInfo endInfo{XR_TYPE_FRAME_END_INFO};
     endInfo.displayTime = currentFrameState_.predictedDisplayTime;
     endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-    endInfo.layerCount = 1;
+    endInfo.layerCount = layerCount;
     endInfo.layers = layers;
 
     XrResult res = xrEndFrame(session, &endInfo);
@@ -266,17 +437,7 @@ bool OpenXRFrameSubmitter::BeginAndAcquireDX12(
     XrPosef& outLeftPose, XrFovf& outLeftFov,
     XrPosef& outRightPose, XrFovf& outRightFov) 
 {
-    // 1. Wait Frame
-    state_ = SubmitterState::WAIT_FRAME;
-    XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
-    XrResult res = xrWaitFrame(session, &waitInfo, &currentFrameState_);
-    if (XR_FAILED(res)) return false;
-
-    // 2. Begin Frame
-    state_ = SubmitterState::BEGIN_FRAME;
-    XrFrameBeginInfo beginInfo{XR_TYPE_FRAME_BEGIN_INFO};
-    res = xrBeginFrame(session, &beginInfo);
-    if (XR_FAILED(res)) return false;
+    if (!WaitAndBeginFrame(session)) return false;
 
     if (!currentFrameState_.shouldRender) {
         state_ = SubmitterState::END_FRAME;
@@ -364,14 +525,53 @@ bool OpenXRFrameSubmitter::ReleaseAndEndDX12(
     projectionLayer.viewCount = 2;
     projectionLayer.views = projectionViews;
 
-    const XrCompositionLayerBaseHeader* const layers[] = {
-        reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projectionLayer)
-    };
+    XrCompositionLayerQuad quadLayer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    XrCompositionLayerQuad cinemaLayer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    const XrCompositionLayerBaseHeader* layers[2];
+    uint32_t layerCount = 1;
+
+    if (cinemaQuadConfig_.enabled) {
+        if (cinemaQuadConfig_.needsRecenter) {
+            RecenterCinemaQuad(lastLeftPose_);
+            cinemaQuadConfig_.needsRecenter = false;
+        }
+
+        cinemaLayer.layerFlags = 0; // Opaque layer
+        cinemaLayer.space = referenceSpace;
+        cinemaLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        cinemaLayer.subImage.swapchain = swapchainManager->GetLeftSwapchain();
+        cinemaLayer.subImage.imageArrayIndex = 0;
+        cinemaLayer.subImage.imageRect.offset = {0, 0};
+        cinemaLayer.subImage.imageRect.extent.width = leftWidth;
+        cinemaLayer.subImage.imageRect.extent.height = leftHeight;
+        cinemaLayer.pose = cinemaQuadConfig_.pose;
+        cinemaLayer.size = {cinemaQuadConfig_.sizeX, cinemaQuadConfig_.sizeY};
+
+        layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&cinemaLayer);
+    } else {
+        layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projectionLayer);
+    }
+
+    if (hudQuadConfig_.enabled && hudQuadConfig_.swapchain != XR_NULL_HANDLE) {
+        quadLayer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        quadLayer.space = referenceSpace;
+        quadLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        quadLayer.subImage.swapchain = hudQuadConfig_.swapchain;
+        quadLayer.subImage.imageArrayIndex = 0;
+        quadLayer.subImage.imageRect.offset = {0, 0};
+        quadLayer.subImage.imageRect.extent.width = hudQuadConfig_.width;
+        quadLayer.subImage.imageRect.extent.height = hudQuadConfig_.height;
+        quadLayer.pose = hudQuadConfig_.pose;
+        quadLayer.size = hudQuadConfig_.size;
+
+        layers[1] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quadLayer);
+        layerCount = 2;
+    }
 
     XrFrameEndInfo endInfo{XR_TYPE_FRAME_END_INFO};
     endInfo.displayTime = currentFrameState_.predictedDisplayTime;
     endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-    endInfo.layerCount = 1;
+    endInfo.layerCount = layerCount;
     endInfo.layers = layers;
 
     XrResult res = xrEndFrame(session, &endInfo);
@@ -402,21 +602,7 @@ bool OpenXRFrameSubmitter::BeginAndAcquireVulkan(
     XrPosef& outLeftPose, XrFovf& outLeftFov,
     XrPosef& outRightPose, XrFovf& outRightFov) 
 {
-    // 1. Wait Frame
-    state_ = SubmitterState::WAIT_FRAME;
-    XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
-    XrResult res = xrWaitFrame(session, &waitInfo, &currentFrameState_);
-    if (XR_FAILED(res)) {
-        return false;
-    }
-
-    // 2. Begin Frame
-    state_ = SubmitterState::BEGIN_FRAME;
-    XrFrameBeginInfo beginInfo{XR_TYPE_FRAME_BEGIN_INFO};
-    res = xrBeginFrame(session, &beginInfo);
-    if (XR_FAILED(res)) {
-        return false;
-    }
+    if (!WaitAndBeginFrame(session)) return false;
 
     if (!currentFrameState_.shouldRender) {
         state_ = SubmitterState::END_FRAME;
@@ -504,14 +690,53 @@ bool OpenXRFrameSubmitter::ReleaseAndEndVulkan(
     projectionLayer.viewCount = 2;
     projectionLayer.views = projectionViews;
 
-    const XrCompositionLayerBaseHeader* const layers[] = {
-        reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projectionLayer)
-    };
+    XrCompositionLayerQuad quadLayer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    XrCompositionLayerQuad cinemaLayer{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    const XrCompositionLayerBaseHeader* layers[2];
+    uint32_t layerCount = 1;
+
+    if (cinemaQuadConfig_.enabled) {
+        if (cinemaQuadConfig_.needsRecenter) {
+            RecenterCinemaQuad(lastLeftPose_);
+            cinemaQuadConfig_.needsRecenter = false;
+        }
+
+        cinemaLayer.layerFlags = 0; // Opaque layer
+        cinemaLayer.space = referenceSpace;
+        cinemaLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        cinemaLayer.subImage.swapchain = swapchainManager->GetLeftSwapchain();
+        cinemaLayer.subImage.imageArrayIndex = 0;
+        cinemaLayer.subImage.imageRect.offset = {0, 0};
+        cinemaLayer.subImage.imageRect.extent.width = leftWidth;
+        cinemaLayer.subImage.imageRect.extent.height = leftHeight;
+        cinemaLayer.pose = cinemaQuadConfig_.pose;
+        cinemaLayer.size = {cinemaQuadConfig_.sizeX, cinemaQuadConfig_.sizeY};
+
+        layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&cinemaLayer);
+    } else {
+        layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projectionLayer);
+    }
+
+    if (hudQuadConfig_.enabled && hudQuadConfig_.swapchain != XR_NULL_HANDLE) {
+        quadLayer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        quadLayer.space = referenceSpace;
+        quadLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        quadLayer.subImage.swapchain = hudQuadConfig_.swapchain;
+        quadLayer.subImage.imageArrayIndex = 0;
+        quadLayer.subImage.imageRect.offset = {0, 0};
+        quadLayer.subImage.imageRect.extent.width = hudQuadConfig_.width;
+        quadLayer.subImage.imageRect.extent.height = hudQuadConfig_.height;
+        quadLayer.pose = hudQuadConfig_.pose;
+        quadLayer.size = hudQuadConfig_.size;
+
+        layers[1] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quadLayer);
+        layerCount = 2;
+    }
 
     XrFrameEndInfo endInfo{XR_TYPE_FRAME_END_INFO};
     endInfo.displayTime = currentFrameState_.predictedDisplayTime;
     endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-    endInfo.layerCount = 1;
+    endInfo.layerCount = layerCount;
     endInfo.layers = layers;
 
     XrResult res = xrEndFrame(session, &endInfo);
@@ -530,6 +755,75 @@ bool OpenXRFrameSubmitter::ReleaseAndEndVulkan(
     }
 
     return true;
+}
+
+void OpenXRFrameSubmitter::SetHudQuad(XrSwapchain swapchain, uint32_t width, uint32_t height, float distance, float sizeX, float sizeY) {
+    hudQuadConfig_.enabled = (swapchain != XR_NULL_HANDLE && width > 0 && height > 0);
+    hudQuadConfig_.swapchain = swapchain;
+    hudQuadConfig_.width = width;
+    hudQuadConfig_.height = height;
+    hudQuadConfig_.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+    hudQuadConfig_.pose.position = {0.0f, 0.0f, -distance};
+    hudQuadConfig_.size = {sizeX, sizeY};
+}
+
+void OpenXRFrameSubmitter::ClearHudQuad() {
+    hudQuadConfig_.enabled = false;
+    hudQuadConfig_.swapchain = XR_NULL_HANDLE;
+    hudQuadConfig_.width = 0;
+    hudQuadConfig_.height = 0;
+}
+
+void OpenXRFrameSubmitter::SetCinemaQuad(bool enabled, float distance, float width, float height) {
+    cinemaQuadConfig_.enabled = enabled;
+    if (distance >= 0.5f) {
+        cinemaQuadConfig_.distance = distance;
+    }
+    float aspect = (height > 0.0f) ? (width / height) : (16.0f / 9.0f);
+    if (aspect < 0.5f || aspect > 4.0f) aspect = 16.0f / 9.0f;
+
+    cinemaQuadConfig_.sizeX = 3.2f;
+    cinemaQuadConfig_.sizeY = cinemaQuadConfig_.sizeX / aspect;
+}
+
+void OpenXRFrameSubmitter::RequestCinemaRecenter() {
+    cinemaQuadConfig_.needsRecenter = true;
+}
+
+void OpenXRFrameSubmitter::RecenterCinemaQuad(const XrPosef& headPose) {
+    float x = headPose.orientation.x;
+    float y = headPose.orientation.y;
+    float z = headPose.orientation.z;
+    float w = headPose.orientation.w;
+
+    // Forward vector in OpenXR reference space (-Z rotated by head orientation)
+    float vx = -2.0f * (x * z + y * w);
+    float vy = -2.0f * (y * z - x * w);
+    float vz = -(1.0f - 2.0f * (x * x + y * y));
+
+    // Project onto horizontal X-Z plane to keep the virtual cinema screen level with gravity
+    float len = std::sqrt(vx * vx + vz * vz);
+    if (len < 0.001f) {
+        vx = 0.0f;
+        vz = -1.0f;
+    } else {
+        vx /= len;
+        vz /= len;
+    }
+
+    // Yaw angle around Y axis
+    float yaw = std::atan2(-vx, -vz);
+    float halfYaw = yaw * 0.5f;
+
+    cinemaQuadConfig_.pose.orientation.x = 0.0f;
+    cinemaQuadConfig_.pose.orientation.y = std::sin(halfYaw);
+    cinemaQuadConfig_.pose.orientation.z = 0.0f;
+    cinemaQuadConfig_.pose.orientation.w = std::cos(halfYaw);
+
+    // Anchor screen at cinema distance in front of current head position, at eye level
+    cinemaQuadConfig_.pose.position.x = headPose.position.x + vx * cinemaQuadConfig_.distance;
+    cinemaQuadConfig_.pose.position.y = headPose.position.y;
+    cinemaQuadConfig_.pose.position.z = headPose.position.z + vz * cinemaQuadConfig_.distance;
 }
 
 } // namespace openxr

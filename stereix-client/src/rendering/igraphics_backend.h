@@ -28,6 +28,7 @@ public:
     // Initialization
     virtual bool Initialize(void* nativeDevice, void* nativeContext) = 0;
     virtual void Shutdown() = 0;
+    virtual void ReleaseResources() {}
 
     virtual void SetState(StereoRendererState state) = 0;
     virtual StereoRendererState GetState() const = 0;

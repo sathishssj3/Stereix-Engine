@@ -31,11 +31,18 @@ extern HMODULE g_hModule; // Declared in dllmain.cpp
 namespace vrinject {
 namespace DX11Hook {
 
+static IDXGISwapChain* g_lastProbedSwapChain = nullptr;
+
+void InvalidateCachedSwapchain() {
+    g_lastProbedSwapChain = nullptr;
+}
+
 typedef HRESULT(__stdcall* Present_t)(IDXGISwapChain*, UINT, UINT);
 typedef HRESULT(__stdcall* Present1_t)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
 typedef HRESULT(__stdcall* ResizeBuffers_t)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 typedef void(__stdcall* UpdateSubresource_t)(ID3D11DeviceContext*, ID3D11Resource*, UINT, const D3D11_BOX*, const void*, UINT, UINT);
 typedef HRESULT(__stdcall* Map_t)(ID3D11DeviceContext*, ID3D11Resource*, UINT, D3D11_MAP, UINT, D3D11_MAPPED_SUBRESOURCE*);
+typedef void(__stdcall* Unmap_t)(ID3D11DeviceContext*, ID3D11Resource*, UINT);
 typedef void(__stdcall* OMSetRenderTargets_t)(ID3D11DeviceContext*, UINT, ID3D11RenderTargetView *const *, ID3D11DepthStencilView *);
 typedef void(__stdcall* ClearDepthStencilView_t)(ID3D11DeviceContext*, ID3D11DepthStencilView *, UINT, FLOAT, UINT8);
 typedef HRESULT(__stdcall* CreateTexture2D_t)(ID3D11Device*, const D3D11_TEXTURE2D_DESC *, const D3D11_SUBRESOURCE_DATA *, ID3D11Texture2D **);
@@ -45,6 +52,7 @@ Present1_t OriginalPresent1 = nullptr;
 ResizeBuffers_t OriginalResizeBuffers = nullptr;
 UpdateSubresource_t OriginalUpdateSubresource = nullptr;
 Map_t OriginalMap = nullptr;
+Unmap_t OriginalUnmap = nullptr;
 OMSetRenderTargets_t OriginalOMSetRenderTargets = nullptr;
 ClearDepthStencilView_t OriginalClearDepthStencilView = nullptr;
 CreateTexture2D_t OriginalCreateTexture2D = nullptr;
@@ -54,9 +62,17 @@ static void* g_targetPresent1 = nullptr;
 static void* g_targetResizeBuffers = nullptr;
 static void* g_targetUpdateSubresource = nullptr;
 static void* g_targetMap = nullptr;
+static void* g_targetUnmap = nullptr;
 static void* g_targetOMSetRenderTargets = nullptr;
 static void* g_targetClearDepthStencilView = nullptr;
 static void* g_targetCreateTexture2D = nullptr;
+
+struct MappedBufferEntry {
+    void* pData = nullptr;
+    UINT byteWidth = 0;
+};
+static std::mutex g_mappedBuffersMutex;
+static std::unordered_map<ID3D11Resource*, MappedBufferEntry> g_mappedBuffers;
 
 
 void VerifyHookIntegrity() {
@@ -115,6 +131,14 @@ HRESULT ProcessPresent(SwapChainType* pSwapChain, OriginalFunc originalFunc, Arg
         static IDXGISwapChain* s_lastProbedSwapChain = nullptr;
         static bool s_lastProbeWasDX12 = false;
         static int s_dx12FailCount = 0;
+
+        // Sync with global invalidation
+        if (!g_lastProbedSwapChain) {
+            s_lastProbedSwapChain = nullptr;
+            s_lastProbeWasDX12 = false;
+            s_dx12FailCount = 0;
+            g_lastProbedSwapChain = (IDXGISwapChain*)1; // sentinel to indicate reset applied
+        }
         
         IDXGISwapChain* baseSwapChain = static_cast<IDXGISwapChain*>(pSwapChain);
         
@@ -147,14 +171,15 @@ HRESULT ProcessPresent(SwapChainType* pSwapChain, OriginalFunc originalFunc, Arg
         bool useDX12 = s_lastProbeWasDX12 && (s_dx12FailCount < 60);
         
         if (useDX12) {
-            Microsoft::WRL::ComPtr<ID3D12CommandQueue> capturedQueue = DXGIFactoryHook::GetCapturedCommandQueue();
+            Microsoft::WRL::ComPtr<ID3D12CommandQueue> capturedQueue;
+            Microsoft::WRL::ComPtr<ID3D12CommandQueue> scQueue;
+            if (SUCCEEDED(baseSwapChain->GetDevice(IID_PPV_ARGS(&scQueue))) && scQueue) {
+                capturedQueue = scQueue;
+            } else {
+                capturedQueue = DXGIFactoryHook::GetCapturedCommandQueue();
+            }
             if (!capturedQueue) {
-                Microsoft::WRL::ComPtr<ID3D12CommandQueue> scQueue;
-                if (SUCCEEDED(baseSwapChain->GetDevice(IID_PPV_ARGS(&scQueue)))) {
-                    capturedQueue = scQueue;
-                    DXGIFactoryHook::SetCapturedCommandQueue(capturedQueue.Get());
-                    LOG_INFO("DX11Hook: Retrieved DX12 CommandQueue from swapchain in ProcessPresent: %p", capturedQueue.Get());
-                }
+                LOG_WARN("DX11Hook: No valid ID3D12CommandQueue available for DX12 presentation!");
             }
             snapshot = Dx12LifecycleManager::Get().ProcessPresent(
                 baseSwapChain, capturedQueue.Get(), hr);
@@ -255,6 +280,20 @@ static HRESULT hkResizeBuffersInternal(IDXGISwapChain* pSwapChain, UINT BufferCo
         Dx11LifecycleManager::Get().ReleaseSwapchainReferences();
         Dx12LifecycleManager::Get().ReleaseSwapchainReferences();
         
+        // Reset depth candidates & lock managers so stale/freed render targets are not dereferenced
+        auto* depthCollector = SubsystemContext::Get().GetDepthCandidateCollector();
+        if (depthCollector) depthCollector->Clear();
+        auto* depthLockMgr = SubsystemContext::Get().GetDepthLockManager();
+        if (depthLockMgr) depthLockMgr->OnDeviceLost();
+        auto* camLockMgr = SubsystemContext::Get().GetCameraLockManager();
+        if (camLockMgr) camLockMgr->Reset();
+
+        // Release shadow copy resources in graphics backend
+        auto* frameCoord = SubsystemContext::Get().GetFrameCoordinator();
+        if (frameCoord) {
+            frameCoord->ReleaseGraphicsResources();
+        }
+
         HRESULT hr = OriginalResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
         
         // Mark lifecycle for rebuild — it will re-acquire the backbuffer on next Present
@@ -300,6 +339,23 @@ HRESULT __stdcall hkCreateTexture2D(ID3D11Device* pDevice, const D3D11_TEXTURE2D
     return hr;
 }
 
+static void EnsureDepthCandidateDiscovered(DepthCandidateCollector* collector, ID3D11Resource* pResource) {
+    if (!collector || !pResource) return;
+    if (collector->IsResourceRegistered(pResource)) return;
+
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> tex;
+    if (SUCCEEDED(pResource->QueryInterface(IID_PPV_ARGS(&tex)))) {
+        D3D11_TEXTURE2D_DESC desc;
+        tex->GetDesc(&desc);
+        uint32_t gen = s_globalTextureGeneration.fetch_add(1, std::memory_order_relaxed);
+        collector->OnDepthSurfaceCreated(
+            pResource, desc.Width, desc.Height, desc.Format,
+            desc.SampleDesc.Count, desc.ArraySize, desc.MipLevels, gen);
+        LOG_INFO("DX11Hook: Auto-discovered depth surface %p (%ux%u, format %u, bind 0x%X)",
+                 pResource, desc.Width, desc.Height, desc.Format, desc.BindFlags);
+    }
+}
+
 void __stdcall hkOMSetRenderTargets(ID3D11DeviceContext* pContext, UINT NumViews, ID3D11RenderTargetView *const *ppRenderTargetViews, ID3D11DepthStencilView *pDepthStencilView) {
     if (pDepthStencilView) {
         __try {
@@ -308,6 +364,7 @@ void __stdcall hkOMSetRenderTargets(ID3D11DeviceContext* pContext, UINT NumViews
                 ID3D11Resource* pResource = nullptr;
                 pDepthStencilView->GetResource(&pResource);
                 if (pResource) {
+                    EnsureDepthCandidateDiscovered(collector, pResource);
                     collector->OnOMSetRenderTargets(pResource);
                     pResource->Release(); // GetResource adds a ref
                 }
@@ -329,6 +386,7 @@ void __stdcall hkClearDepthStencilView(ID3D11DeviceContext* pContext, ID3D11Dept
                 ID3D11Resource* pResource = nullptr;
                 pDepthStencilView->GetResource(&pResource);
                 if (pResource) {
+                    EnsureDepthCandidateDiscovered(collector, pResource);
                     collector->OnClearDepthStencilView(pResource, Depth);
                     pResource->Release();
                 }
@@ -372,14 +430,46 @@ void __stdcall hkUpdateSubresource(ID3D11DeviceContext* pContext, ID3D11Resource
 HRESULT __stdcall hkMap(ID3D11DeviceContext* pContext, ID3D11Resource* pResource, UINT Subresource, D3D11_MAP MapType, UINT MapFlags, D3D11_MAPPED_SUBRESOURCE* pMappedResource) {
     HRESULT hr = OriginalMap ? OriginalMap(pContext, pResource, Subresource, MapType, MapFlags, pMappedResource) : DXGI_ERROR_INVALID_CALL;
     
-    // We can't safely intercept map writes because they happen AFTER Map returns, via CPU pointer.
-    // However, some games use Map(WRITE_DISCARD) and write immediately.
-    // To truly capture Map, we'd need to intercept Unmap. For now, we skip Map or just rely on UpdateSubresource.
-    // We'll leave it as a passthrough for now, as most camera CBs are UpdateSubresource or Map/Unmap.
-    // Ideally we hook Unmap to read the data, but Unmap doesn't give us the data pointer. 
-    // We would need to track Map returns. Let's just hook UpdateSubresource for now.
+    if (SUCCEEDED(hr) && pMappedResource && pMappedResource->pData && pResource) {
+        D3D11_RESOURCE_DIMENSION dim;
+        pResource->GetType(&dim);
+        if (dim == D3D11_RESOURCE_DIMENSION_BUFFER) {
+            auto* pBuf = static_cast<ID3D11Buffer*>(pResource);
+            D3D11_BUFFER_DESC desc;
+            pBuf->GetDesc(&desc);
+            if (desc.BindFlags & D3D11_BIND_CONSTANT_BUFFER) {
+                std::lock_guard<std::mutex> lock(g_mappedBuffersMutex);
+                g_mappedBuffers[pResource] = { pMappedResource->pData, desc.ByteWidth };
+            }
+        }
+    }
     
     return hr;
+}
+
+void __stdcall hkUnmap(ID3D11DeviceContext* pContext, ID3D11Resource* pResource, UINT Subresource) {
+    if (pResource) {
+        MappedBufferEntry entry{};
+        bool found = false;
+        {
+            std::lock_guard<std::mutex> lock(g_mappedBuffersMutex);
+            auto it = g_mappedBuffers.find(pResource);
+            if (it != g_mappedBuffers.end()) {
+                entry = it->second;
+                g_mappedBuffers.erase(it);
+                found = true;
+            }
+        }
+        if (found && entry.pData && entry.byteWidth >= sizeof(Matrix4x4)) {
+            auto* collector = SubsystemContext::Get().GetCandidateCollector();
+            if (collector) {
+                collector->OnConstantBufferUpdate(static_cast<ID3D11Buffer*>(pResource), entry.pData, entry.byteWidth);
+            }
+        }
+    }
+    if (OriginalUnmap) {
+        OriginalUnmap(pContext, pResource, Subresource);
+    }
 }
 
 bool Initialize() {
@@ -481,6 +571,25 @@ bool Initialize() {
         std::string filenameLower = toLower(filename);
         std::string pathLower = toLower(path);
         
+        // Legitimate vendor interposers (e.g. NVIDIA Streamline framework used by Ghost of Tsushima, Spider-Man, etc.)
+        if (filenameLower == "sl.interposer.dll") {
+            char exePath[MAX_PATH] = {};
+            if (GetModuleFileNameA(NULL, exePath, MAX_PATH)) {
+                std::string exeDir(exePath);
+                size_t exeSlash = exeDir.find_last_of("\\/");
+                if (exeSlash != std::string::npos) {
+                    exeDir = exeDir.substr(0, exeSlash + 1);
+                }
+                std::string exeDirLower = toLower(exeDir);
+                if (pathLower.rfind(exeDirLower, 0) == 0 && GetProcAddress(hMod, "slInit") != nullptr) {
+                    LOG_INFO("DX11Hook: Verified legitimate NVIDIA Streamline interposer at '%s'. Allowing hook target.", modName);
+                    return true;
+                }
+            }
+            LOG_WARN("DX11Hook: Found 'sl.interposer.dll' at '%s' but failed validation against application directory — skipping.", modName);
+            return false;
+        }
+
         if (filenameLower != "d3d11.dll" &&
             filenameLower != "dxgi.dll" &&
             filenameLower != "d3d12.dll" &&
@@ -493,6 +602,23 @@ bool Initialize() {
         if (GetSystemDirectoryA(sysDir, MAX_PATH)) {
             std::string sysPathLower = toLower(sysDir);
             if (pathLower.rfind(sysPathLower, 0) != 0) {
+                // Check if this is Microsoft Agility SDK D3D12Core.dll located within the game directory
+                if (filenameLower == "d3d12core.dll") {
+                    char exePath[MAX_PATH] = {};
+                    if (GetModuleFileNameA(NULL, exePath, MAX_PATH)) {
+                        std::string exeDir(exePath);
+                        size_t exeSlash = exeDir.find_last_of("\\/");
+                        if (exeSlash != std::string::npos) {
+                            exeDir = exeDir.substr(0, exeSlash + 1);
+                        }
+                        std::string exeDirLower = toLower(exeDir);
+                        if (pathLower.rfind(exeDirLower, 0) == 0 &&
+                            (GetProcAddress(hMod, "D3D12SDKVersion") != nullptr || GetProcAddress(hMod, "D3D12GetInterface") != nullptr)) {
+                            LOG_INFO("DX11Hook: Verified Microsoft Agility SDK '%s' at '%s'. Allowing hook target.", filename.c_str(), modName);
+                            return true;
+                        }
+                    }
+                }
                 LOG_WARN("DX11Hook: Hook target %p resides in '%s', which is outside Windows system directory '%s' — skipping.", addr, modName, sysDir);
                 return false;
             }
@@ -538,6 +664,13 @@ bool Initialize() {
             MH_EnableHook(mapAddress);
         }
     }
+
+    if (IsValidHookTarget(unmapAddress)) {
+        if (MH_CreateHook(unmapAddress, (void*)hkUnmap, (void**)&OriginalUnmap) == MH_OK) {
+            g_targetUnmap = unmapAddress;
+            MH_EnableHook(unmapAddress);
+        }
+    }
     
     if (IsValidHookTarget(omSetRenderTargetsAddress)) {
         if (MH_CreateHook(omSetRenderTargetsAddress, (void*)hkOMSetRenderTargets, (void**)&OriginalOMSetRenderTargets) == MH_OK) {
@@ -571,6 +704,11 @@ void Shutdown() {
     if (g_targetResizeBuffers) { MH_DisableHook(g_targetResizeBuffers); g_targetResizeBuffers = nullptr; }
     if (g_targetUpdateSubresource) { MH_DisableHook(g_targetUpdateSubresource); g_targetUpdateSubresource = nullptr; }
     if (g_targetMap) { MH_DisableHook(g_targetMap); g_targetMap = nullptr; }
+    if (g_targetUnmap) { MH_DisableHook(g_targetUnmap); g_targetUnmap = nullptr; }
+    {
+        std::lock_guard<std::mutex> lock(g_mappedBuffersMutex);
+        g_mappedBuffers.clear();
+    }
     if (g_targetOMSetRenderTargets) { MH_DisableHook(g_targetOMSetRenderTargets); g_targetOMSetRenderTargets = nullptr; }
     if (g_targetClearDepthStencilView) { MH_DisableHook(g_targetClearDepthStencilView); g_targetClearDepthStencilView = nullptr; }
     if (g_targetCreateTexture2D) { MH_DisableHook(g_targetCreateTexture2D); g_targetCreateTexture2D = nullptr; }

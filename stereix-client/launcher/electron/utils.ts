@@ -59,6 +59,9 @@ export function validateConfig(cfg: unknown): VRConfig {
   if (typeof c.hapticFeedback === 'boolean') res.hapticFeedback = c.hapticFeedback;
   if (typeof c.aiInpainting === 'boolean') res.aiInpainting = c.aiInpainting;
   if (typeof c.telemetryOptIn === 'boolean') res.telemetryOptIn = c.telemetryOptIn;
+  if (typeof c.convergence === 'number' && !isNaN(c.convergence)) res.convergence = c.convergence;
+  if (typeof c.ipd === 'number' && !isNaN(c.ipd)) res.ipd = c.ipd;
+  if (typeof c.aiNotes === 'string') res.aiNotes = c.aiNotes;
   return res;
 }
 

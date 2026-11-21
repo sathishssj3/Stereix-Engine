@@ -39,8 +39,9 @@ public:
 private:
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocators[MAX_FRAMES_IN_FLIGHT];
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandLists[MAX_FRAMES_IN_FLIGHT];
     uint64_t m_frameFences[MAX_FRAMES_IN_FLIGHT] = {0, 0, 0};
+    uint32_t m_currentFrameIndex = 0;
     
     mutable std::mutex m_mutex;
     

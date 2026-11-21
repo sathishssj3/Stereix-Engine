@@ -73,6 +73,11 @@ contextBridge.exposeInMainWorld('ag', {
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
   },
+  ai: {
+    requestProfile: (req: unknown) => ipcRenderer.invoke('stereix:request-ai-profile', req),
+    tuneProfile: (req: unknown) => ipcRenderer.invoke('stereix:tune-ai-profile', req),
+    getStatus: () => ipcRenderer.invoke('stereix:get-ai-status'),
+  },
   versions: {
     electron: process.versions.electron,
     node: process.versions.node,

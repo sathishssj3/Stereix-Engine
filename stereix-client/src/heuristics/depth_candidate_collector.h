@@ -24,6 +24,8 @@ public:
     std::vector<DepthCandidate> GetCandidatesSnapshot() const;
     void Clear();
 
+    bool IsResourceRegistered(void* resourcePointer) const;
+
 private:
 
     mutable std::mutex m_mutex;

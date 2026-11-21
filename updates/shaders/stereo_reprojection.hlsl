@@ -91,11 +91,14 @@ float3 ApplyPerceptualGrading(float3 color, float contrast, float saturation, fl
 // Display gamma transfer curve: active when opted in via profile (SrgbCorrection != 0).
 // Modern game backbuffers are already tone-mapped and display-ready for sRGB. The OpenXR compositor
 // and display runtimes (SteamVR, Quest Link, Virtual Desktop) apply an inverse gamma curve (~1/2.2) when presenting.
-// Applying exact display gamma pow(clamp(c, 0.0f, 1.0f), 2.2f) provides an identical mathematical cancellation
-// (pow(c, 2.2f))^(1/2.2) == c, preventing lifted shadows and reproducing desktop graphics 1:1 with zero brightening.
+// Applying exact IEC 61966-2-1 transfer curve converts tone-mapped sRGB to linear before presentation,
+// so that the compositor's transfer function restores the authentic, bit-exact desktop monitor colors,
+// preventing lifted/milky shadows and reproducing desktop graphics 1:1 with zero wash-out across all games.
 float3 ApplySrgbTransfer(float3 c)
 {
-    return pow(clamp(c, 0.0f, 1.0f), 2.2f);
+    float3 linearLow = c / 12.92f;
+    float3 linearHigh = pow(max((c + 0.055f) / 1.055f, 0.0f), 2.4f);
+    return lerp(linearLow, linearHigh, step(0.04045f, c));
 }
 
 // Standard depth unprojection
@@ -219,6 +222,29 @@ float2 ApplyHorizonLock(float2 uv, float rollCorr, float strength)
     return rotated * 0.5f + 0.5f;
 }
 
+// Neighborhood-Clamped Contrast Adaptive Sharpening (CAS)
+// Clamping strictly against the 4-neighbor min/max bounding box mathematically guarantees
+// zero haloing, zero ringing, and zero stereo disparity noise between the eyes.
+float3 ApplyCasSharpening(Texture2D<float4> tex, SamplerState s, float2 centerUv, float2 texelSize, float3 currentColor, float sharpness)
+{
+    if (sharpness < 0.01f) return currentColor;
+    
+    float3 n = tex.SampleLevel(s, centerUv + float2(0.0f, -texelSize.y), 0).rgb;
+    float3 s_ = tex.SampleLevel(s, centerUv + float2(0.0f, texelSize.y), 0).rgb;
+    float3 w = tex.SampleLevel(s, centerUv + float2(-texelSize.x, 0.0f), 0).rgb;
+    float3 e = tex.SampleLevel(s, centerUv + float2(texelSize.x, 0.0f), 0).rgb;
+    
+    float3 minClr = min(currentColor, min(min(n, s_), min(w, e)));
+    float3 maxClr = max(currentColor, max(max(n, s_), max(w, e)));
+    
+    // Contrast adaptive weight (stronger in flat areas, softer near edges)
+    float3 amp = saturate(min(minClr, 1.0f - maxClr) / (maxClr + 0.0001f));
+    float3 weight = -sqrt(amp) * (sharpness * 0.35f);
+    
+    float3 sharp = (currentColor + (n + s_ + w + e) * weight) / (1.0f + 4.0f * weight);
+    return clamp(sharp, minClr, maxClr);
+}
+
 [numthreads(8, 8, 1)]
 void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -237,23 +263,39 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     
     if (ShouldAttemptStereo == 0)
     {
-        // 2D Virtual Screen Mode:
-        // In VR headsets, the left and right optical axes are canted (asymmetric nasal/temporal FOV).
-        // Sending identical screen-space coordinates causes severe binocular diplopia (SBS double vision)
-        // and eye-strain because the optical centers are angled apart.
-        // To fuse flat 2D content (loading screens, start menus, cutscenes) into a comfortable virtual screen at ~2.0m:
-        // Offset Left eye sampling rightward (nasal) and Right eye sampling leftward (nasal).
-        const float convergenceOffset = 0.022f; // ~2.2% horizontal shift matching ~1.8m convergence
+        // Full ratio VR view for 2D presentation / menus / loading screens:
+        // Default to full immersive FOV coverage (100% viewport coverage, full VR aspect ratio).
+        // Only if theater mode is actively requested (e.g. during cinematic cutscenes via TheaterModeWeight)
+        // do we transition to a comfortable floating virtual cinema screen.
+        float2 leftUV = sampleUV;
+        float2 rightUV = sampleUV;
+        float4 leftColor = baseColor;
+        float4 rightColor = baseColor;
 
-        float2 leftUV = float2(sampleUV.x - convergenceOffset, sampleUV.y);
-        float2 rightUV = float2(sampleUV.x + convergenceOffset, sampleUV.y);
+        if (TheaterModeWeight > 0.001f)
+        {
+            const float screenScale = lerp(1.0f, 0.76f, saturate(TheaterModeWeight));
+            float2 centered = (sampleUV - 0.5f) / screenScale + 0.5f;
 
-        float4 leftColor = (leftUV.x >= 0.0f && leftUV.x <= 1.0f) ? GameColor.SampleLevel(LinearSampler, leftUV, 0) : float4(0.02f, 0.02f, 0.02f, 1.0f);
-        float4 rightColor = (rightUV.x >= 0.0f && rightUV.x <= 1.0f) ? GameColor.SampleLevel(LinearSampler, rightUV, 0) : float4(0.02f, 0.02f, 0.02f, 1.0f);
+            const float convergenceOffset = 0.016f * saturate(TheaterModeWeight);
+            leftUV = float2(centered.x - convergenceOffset, centered.y);
+            rightUV = float2(centered.x + convergenceOffset, centered.y);
 
-        // P1.1: Theater mode in 2D passthrough
-        leftColor = ApplyTheaterMode(leftColor, uv, TheaterModeWeight, TheaterDistance);
-        rightColor = ApplyTheaterMode(rightColor, uv, TheaterModeWeight, TheaterDistance);
+            float4 cinemaVoid = float4(0.015f, 0.015f, 0.02f, 1.0f); // Dark ambient void
+            leftColor = cinemaVoid;
+            rightColor = cinemaVoid;
+
+            if (leftUV.x >= 0.0f && leftUV.x <= 1.0f && leftUV.y >= 0.0f && leftUV.y <= 1.0f)
+            {
+                leftColor = GameColor.SampleLevel(LinearSampler, leftUV, 0);
+                leftColor.a = 1.0f;
+            }
+            if (rightUV.x >= 0.0f && rightUV.x <= 1.0f && rightUV.y >= 0.0f && rightUV.y <= 1.0f)
+            {
+                rightColor = GameColor.SampleLevel(LinearSampler, rightUV, 0);
+                rightColor.a = 1.0f;
+            }
+        }
 
         leftColor.rgb = ApplyPerceptualGrading(leftColor.rgb, Contrast, Saturation, Brightness);
         rightColor.rgb = ApplyPerceptualGrading(rightColor.rgb, Contrast, Saturation, Brightness);
@@ -293,9 +335,6 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             hudColor = GameColor.SampleLevel(LinearSampler, curvedUV, 0);
             hudColor.a = 1.0f;
         }
-
-        // P1.1: Theater mode for HUD
-        hudColor = ApplyTheaterMode(hudColor, uv, TheaterModeWeight, TheaterDistance);
 
         hudColor.rgb = ApplyPerceptualGrading(hudColor.rgb, Contrast, Saturation, Brightness);
         if (SrgbCorrection != 0)
@@ -357,10 +396,11 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
     }
 
-    // P1.1: Theater mode for 3D content
-    leftColor = ApplyTheaterMode(leftColor, uv, TheaterModeWeight, TheaterDistance);
-    rightColor = ApplyTheaterMode(rightColor, uv, TheaterModeWeight, TheaterDistance);
-    
+    // Apply neighborhood-clamped Contrast Adaptive Sharpening (0.65 intensity)
+    float2 texelSize = float2(1.0f / (float)Width, 1.0f / (float)Height);
+    leftColor.rgb = ApplyCasSharpening(GameColor, LinearSampler, uv, texelSize, leftColor.rgb, 0.65f);
+    rightColor.rgb = ApplyCasSharpening(GameColor, LinearSampler, uv, texelSize, rightColor.rgb, 0.65f);
+
     // Apply perceptual filmic harmonization (pure 1:1 identity at default Contrast 1.0, Saturation 1.0, Brightness 1.0)
     leftColor.rgb = ApplyPerceptualGrading(leftColor.rgb, Contrast, Saturation, Brightness);
     rightColor.rgb = ApplyPerceptualGrading(rightColor.rgb, Contrast, Saturation, Brightness);

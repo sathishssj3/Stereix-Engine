@@ -35,9 +35,12 @@ async function start() {
   // Spawn Electron process directly using the native electron binary
   console.log(`\x1b[35m[Electron]\x1b[0m Starting Electron...`);
   
+  const cleanEnv = { ...process.env };
+  delete cleanEnv.ELECTRON_RUN_AS_NODE;
+
   const electronProcess = spawn(electronPath, ['.'], {
     env: { 
-      ...process.env, 
+      ...cleanEnv, 
       NODE_ENV: 'development',
       VITE_DEV_SERVER_URL: url
     },

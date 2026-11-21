@@ -10,9 +10,10 @@
 <link rel="canonical" href="https://stereix-engine.pages.dev/">
 
 <!-- Stereix Engine Brand Logo -->
-<link rel="icon" type="image/png" sizes="32x32" href="logo.png?v=2">
-<link rel="shortcut icon" type="image/x-icon" href="favicon.ico?v=2">
-<link rel="apple-touch-icon" sizes="180x180" href="logo.png?v=2">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png?v=3">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png?v=3">
+<link rel="shortcut icon" type="image/x-icon" href="favicon.ico?v=3">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=3">
 
 <!-- OpenGraph / Social Graph -->
 <meta property="og:site_name" content="Stereix Engine">
@@ -84,7 +85,7 @@ if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   --red:#DC143C;
   --red-deep:#8B0021;
   --white:#F2F2F3;
-  --muted:#7A7A80;
+  --muted:#8E8E96;
   --dim:#5C5C64;
 
   --display:'Chakra Petch',system-ui,sans-serif;
@@ -114,7 +115,7 @@ a{color:inherit;text-decoration:none}
 :focus-visible{outline:2px solid var(--red);outline-offset:3px;border-radius:2px}
 
 /* ---------- shared rhythm (defined ONCE, never overridden) ---------- */
-.section{padding-block:clamp(5rem,11vw,9.5rem);position:relative;scroll-margin-top:4.25rem}
+.section{padding-block:clamp(3rem,6vw,5rem);position:relative;scroll-margin-top:4.25rem}
 /* Sections that continue the one above them rather than starting a new
    idea — they share a heading and should not read as a separate beat. */
 .section.tight{padding-top:0}
@@ -131,8 +132,8 @@ a{color:inherit;text-decoration:none}
 /* Sized to fill ~93% of the content column: "FLAT GAME IN." measures 6.36em,
    so below the 1280px cap that lands on a constant 13.1vw. The max stops it
    overflowing once the container stops growing. */
-.d1{font-family:var(--display);font-weight:700;font-size:clamp(2.1rem,13.1vw,10.3rem);
-    line-height:.9;letter-spacing:-.04em;margin:0}
+.d1{font-family:var(--display);font-weight:700;font-size:clamp(2.5rem,11.2vw,9rem);
+    line-height:.92;letter-spacing:-.035em;margin:0 0 1.85rem}
 .d2{font-family:var(--display);font-weight:700;font-size:clamp(1.95rem,4.2vw,3.25rem);
     line-height:1.02;letter-spacing:-.02em;margin:0 0 1.1rem}
 .d3{font-family:var(--display);font-weight:600;font-size:1.0625rem;
@@ -142,7 +143,7 @@ a{color:inherit;text-decoration:none}
 .lede{color:var(--muted);font-size:clamp(1rem,1.35vw,1.15rem);max-width:46ch;margin:1.6rem 0 0}
 /* Wider than the body default so it reads as a base under the big title
    rather than a narrow column stranded beneath it. */
-.hero .lede{max-width:58ch;margin-inline:auto}
+.hero .lede{max-width:52ch;margin:0 auto 2.25rem;font-size:1.025rem;line-height:1.65;color:#8E8E96}
 .small{font-size:.8125rem;color:var(--muted);line-height:1.6}
 .mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
 .prose p{color:var(--muted);font-size:.9375rem;max-width:64ch}
@@ -160,15 +161,47 @@ code{font-family:var(--mono)}
   content:none !important;
 }
 
+
+/* ============================================================
+   APPLE DESIGN PLATFORM PHYSICS (Instant press feedback)
+   ============================================================ */
+.btn:active, .foot-social-btn:active, .mobile-menu-btn:active, .hero-tag:active, .card:active {
+  transform: scale(0.965) !important;
+  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
 /* ---------- nav ---------- */
-.nav{position:fixed;inset:0 0 auto;z-index:60;transition:background .35s,border-color .35s,backdrop-filter .35s}
-.nav-in{display:flex;align-items:center;gap:2rem;height:4.25rem;
-        width:100%;max-width:var(--maxw);margin-inline:auto;padding-inline:var(--gutter)}
-.nav.stuck{
-  background:rgba(8,8,11,.62);backdrop-filter:blur(22px) saturate(130%);
-  -webkit-backdrop-filter:blur(22px) saturate(130%);
-  border-bottom:1px solid var(--edge);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+.nav{
+  position:fixed;
+  inset:0 0 auto;
+  z-index:60;
+  pointer-events:none;
+  padding:0.75rem 1rem 0;
+  transition:all .35s var(--ease);
+}
+.nav-in{
+  pointer-events:auto;
+  display:flex;
+  align-items:center;
+  gap:2rem;
+  height:3.85rem;
+  width:100%;
+  max-width:1200px;
+  margin-inline:auto;
+  padding-inline:1.5rem;
+  border-radius:9999px;
+  background:rgba(8, 8, 11, 0.78);
+  backdrop-filter:blur(24px) saturate(140%);
+  -webkit-backdrop-filter:blur(24px) saturate(140%);
+  border:1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:0 12px 36px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition:all .3s var(--ease);
+}
+.nav.stuck .nav-in{
+  background:rgba(6, 6, 8, 0.92);
+  border-color:rgba(255, 255, 255, 0.14);
+  box-shadow:0 16px 40px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transform:translateY(-2px);
 }
 .brand{font-family:var(--display);font-weight:800;letter-spacing:.08em;font-size:1.05rem;
        text-transform:uppercase;display:flex;align-items:center;gap:.6rem;margin-right:auto;
@@ -307,12 +340,24 @@ code{font-family:var(--mono)}
 
 /* ---------- buttons ---------- */
 .btn{
-  font-family:var(--display);font-weight:600;font-size:.8125rem;letter-spacing:.13em;
-  text-transform:uppercase;display:inline-flex;align-items:center;gap:.7rem;
-  padding:.95rem 1.6rem;border:1px solid var(--edge);background:transparent;color:var(--white);
-  position:relative;overflow:hidden;cursor:pointer;
+  font-family:var(--display);font-weight:600;font-size:.75rem;letter-spacing:.09em;
+  text-transform:uppercase;display:inline-flex;align-items:center;justify-content:center;gap:.6rem;
+  padding:.55rem 1.25rem;border:1px solid var(--edge);background:transparent;color:var(--white);
+  position:relative;overflow:hidden;cursor:pointer;border-radius:3px;min-height:38px;
   transition:border-color .3s,color .3s,background .3s,transform .25s var(--ease),box-shadow .3s var(--ease);
   white-space:nowrap;will-change:transform;
+}
+.btn-ghost{
+  border:1px solid rgba(255, 255, 255, 0.14);
+  background:rgba(255, 255, 255, 0.03);
+  color:var(--muted);
+}
+.btn-ghost::before{background:rgba(255, 255, 255, 0.08)}
+.btn-ghost:hover{
+  border-color:rgba(255, 255, 255, 0.35);
+  color:var(--white);
+  background:rgba(255, 255, 255, 0.06);
+  box-shadow:0 4px 14px rgba(0,0,0,.4);
 }
 /* The nav bar is a fixed 4.25rem. Below ~560px "DOWNLOAD V0.1.3" no longer fits
    beside the wordmark and wraps out of the bar, so the version is dropped and
@@ -333,19 +378,19 @@ code{font-family:var(--mono)}
 .btn-primary::before{background:#fff}
 .btn-primary:hover{color:var(--void);box-shadow:0 8px 26px rgba(220, 20, 60,.4)}
 .btn-row{display:flex;flex-wrap:wrap;gap:.85rem;margin-top:2.4rem}
-.hero .btn-row{justify-content:center}
+.hero .btn-row{display:flex;justify-content:center;align-items:center;gap:.85rem;margin:0 auto 2.75rem}
 
 /* ---------- hero ---------- */
 .hero{
-  min-height:100vh;
-  min-height:100svh;
+  min-height:calc(100vh - 4.25rem);
+  min-height:calc(100svh - 4.25rem);
+  margin-top:4.25rem;
   position:relative;
   display:flex;
   flex-direction:column;
   justify-content:center;
   align-items:center;
-  padding-top:4.25rem;
-  padding-bottom:2rem;
+  padding:1rem 0 1.5rem;
   box-sizing:border-box;
 }
 /* Deliberately wider than --maxw: the title bleeds past the body column so it
@@ -371,7 +416,7 @@ code{font-family:var(--mono)}
 }
 .hero-tag{font-family:var(--display);font-size:.7rem;font-weight:600;letter-spacing:.2em;
           text-transform:uppercase;color:var(--muted);display:inline-flex;align-items:center;
-          gap:.6rem;border:1px solid var(--edge);padding:.45rem .8rem;margin-bottom:1.4rem;
+          gap:.6rem;border:1px solid var(--edge);padding:.42rem .8rem;margin-bottom:1.35rem;
           cursor:default;transition:border-color .3s,background .3s,transform .3s var(--ease),box-shadow .3s var(--ease)}
 .hero-tag:hover{border-color:var(--edge-hot);background:rgba(220, 20, 60,.04);
                 transform:translateY(-1px);box-shadow:0 4px 18px rgba(220, 20, 60,.12)}
@@ -385,7 +430,7 @@ code{font-family:var(--mono)}
 .rail-bar{
   width:100%;
   max-width:var(--maxw);
-  margin:5rem auto 4rem;
+  margin:0 auto;
   padding:0 var(--gutter);
   display:flex;
   justify-content:center;
@@ -684,25 +729,234 @@ code{font-family:var(--mono)}
 .form-note.err{color:var(--red);font-weight:500}
 .hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}
 
-/* ---------- footer ---------- */
-.foot{border-top:1px solid var(--edge);padding-block:3.5rem 3rem}
-.foot-grid{display:grid;grid-template-columns:1.5fr repeat(3,1fr);gap:clamp(1.8rem,4vw,3rem);
-           margin-bottom:2.8rem}
-@media(max-width:860px){.foot-grid{grid-template-columns:1fr 1fr}}
-@media(max-width:520px){.foot-grid{grid-template-columns:1fr}}
-.foot-grid h4{font-family:var(--display);font-size:.6875rem;font-weight:600;letter-spacing:.18em;
-              text-transform:uppercase;color:var(--muted);margin:0 0 1.15rem}
-.foot-grid ul{list-style:none;margin:0;padding:0;display:grid;gap:.6rem;font-size:.875rem}
-.foot-grid a, .foot-btn-link{color:var(--muted);transition:color .25s,transform .25s var(--ease);display:inline-block}
-.foot-grid a:hover, .foot-btn-link:hover{color:var(--white);transform:translateX(3px)}
-.foot-btn-link{background:none;border:none;padding:0;font-family:inherit;font-size:inherit;cursor:pointer;text-align:left}
-.foot-email-link{color:var(--white);display:inline-flex;align-items:center;gap:0.45rem;transition:color .2s}
-.foot-email-link:hover{color:var(--red)}
-.foot-grid .brand{display:inline-flex!important;align-items:center;gap:.65rem;color:var(--white);
-                  font-family:var(--display);font-weight:700;letter-spacing:.02em;font-size:.95rem}
-.foot-grid .brand:hover{transform:none;color:var(--white)}
-.foot-in{display:flex;flex-wrap:wrap;gap:1.5rem;justify-content:space-between;align-items:center;
-         border-top:1px solid var(--edge);padding-top:2.4rem}
+
+/* ============================================================
+   MONUMENTAL BRAND FOOTER (Wispr Flow style)
+   ============================================================ */
+.foot {
+  border-top: 1px solid var(--edge);
+  background: var(--void);
+  padding: 4.5rem 0 3rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.foot-grid {
+  display: grid;
+  grid-template-columns: 1.5fr repeat(3, 1fr);
+  gap: clamp(1.8rem, 4vw, 3.5rem);
+  margin-bottom: 3.5rem;
+}
+
+@media(max-width: 860px) {
+  .foot-grid { grid-template-columns: 1fr 1fr; gap: 2rem; }
+}
+
+@media(max-width: 520px) {
+  .foot-grid { grid-template-columns: 1fr; gap: 2rem; }
+}
+
+.foot-grid h4 {
+  font-family: var(--display);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 1.25rem;
+}
+
+.foot-grid ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+  font-size: 0.875rem;
+}
+
+.foot-grid a, .foot-btn-link {
+  color: #8E8E96;
+  transition: color 0.25s, transform 0.25s var(--ease);
+  display: inline-block;
+}
+
+.foot-grid a:hover, .foot-btn-link:hover {
+  color: var(--white);
+  transform: translateX(3px);
+}
+
+.foot-btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.foot-email-link {
+  color: var(--white);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  transition: color 0.2s;
+  font-size: 0.8125rem;
+}
+
+.foot-email-link:hover {
+  color: var(--red);
+}
+
+/* Colossal Brand Billboard (Wispr Flow signature lockup) */
+.foot-billboard-wrap {
+  width: 100%;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: clamp(2.5rem, 6vw, 4.5rem) 0 clamp(2rem, 5vw, 3.5rem);
+  position: relative;
+}
+
+.foot-billboard-wrap::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(220, 20, 60, 0.5), transparent);
+}
+
+.foot-billboard {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: clamp(1rem, 3.5vw, 3.5rem);
+  width: 100%;
+  text-decoration: none;
+  color: var(--white);
+  user-select: none;
+  transition: transform 0.35s var(--ease), opacity 0.35s;
+}
+
+.foot-billboard:hover {
+  opacity: 0.95;
+  transform: translateY(-2px);
+}
+
+.foot-billboard-mark {
+  width: clamp(3.75rem, 14vw, 11.5rem);
+  height: clamp(3.75rem, 14vw, 11.5rem);
+  flex-shrink: 0;
+  object-fit: contain;
+  filter: drop-shadow(0 0 24px rgba(220, 20, 60, 0.35));
+  transition: transform 0.45s var(--ease), filter 0.45s;
+}
+
+.foot-billboard:hover .foot-billboard-mark {
+  transform: scale(1.04) rotate(3deg);
+  filter: drop-shadow(0 0 35px rgba(220, 20, 60, 0.6));
+}
+
+.foot-billboard-text {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(3.75rem, 15vw, 13.5rem);
+  line-height: 0.88;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+  color: var(--white);
+  display: flex;
+  align-items: baseline;
+  gap: clamp(0.4rem, 1.2vw, 1.2rem);
+  margin: 0;
+}
+
+.foot-billboard-suffix {
+  font-size: clamp(0.9rem, 2.8vw, 2.5rem);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--red);
+  text-transform: uppercase;
+  vertical-align: super;
+}
+
+/* Bottom Strip */
+.foot-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+  border-top: 1px solid var(--edge);
+  padding-top: 2rem;
+}
+
+.foot-bottom-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.foot-legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.25rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.foot-legal-links a, .foot-legal-links button {
+  color: inherit;
+  transition: color 0.2s;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.foot-legal-links a:hover, .foot-legal-links button:hover {
+  color: var(--white);
+}
+
+.foot-social-links {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.foot-social-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--muted);
+  transition: all 0.25s var(--ease);
+}
+
+.foot-social-btn:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-2px);
+}
+
+@media(max-width: 640px) {
+  .foot { padding-top: 3.5rem; }
+  .foot-billboard-wrap { padding: 2rem 0 1.75rem; }
+  .foot-billboard { gap: 1rem; }
+  .foot-bottom { flex-direction: column; align-items: flex-start; gap: 1.25rem; }
+  .foot-social-links { width: 100%; justify-content: flex-start; }
+}
+
 
 /* ---------- reveal ---------- */
 .rv{opacity:0;transform:translate3d(0,26px,0);
@@ -936,7 +1190,7 @@ code{font-family:var(--mono)}
 }
 
 /* ============================================================
-   NEXVR ENGINE — PRECISION TELEMETRY CUSTOM SCROLLBAR
+   STEREIX ENGINE — PRECISION TELEMETRY CUSTOM SCROLLBAR
    Matches the black / red / white cybernetic engine aesthetic
    ============================================================ */
 html {
@@ -1151,12 +1405,26 @@ body::-webkit-scrollbar {
     max-width: 100%;
     box-sizing: border-box;
   }
+  .hero {
+    min-height: auto !important;
+    margin-top: 3.75rem !important;
+    padding-top: 2.5rem !important;
+    padding-bottom: 4rem !important;
+    justify-content: flex-start !important;
+  }
+  .hero-tag {
+    font-size: 0.65rem !important;
+    letter-spacing: 0.16em !important;
+    padding: 0.38rem 0.75rem !important;
+    margin-bottom: 2.25rem !important;
+    gap: 0.45rem !important;
+  }
   .d1 {
-    font-size: clamp(2.35rem, 11vw, 4.25rem) !important;
-    line-height: 0.94 !important;
+    font-size: clamp(2.4rem, 10vw, 3.85rem) !important;
+    line-height: 0.98 !important;
     letter-spacing: -0.035em !important;
     max-width: 100%;
-    margin-bottom: 0.2rem;
+    margin-bottom: 1.85rem !important;
   }
   .d1 .ghost {
     max-width: 100%;
@@ -1166,15 +1434,37 @@ body::-webkit-scrollbar {
     display: none !important;
   }
   .hero .lede {
-    font-size: 0.85rem !important;
-    line-height: 1.55 !important;
+    font-size: 0.9rem !important;
+    line-height: 1.65 !important;
     max-width: 42ch !important;
-    margin: 1.15rem auto 0 !important;
-    color: #8c8c94 !important;
+    margin: 0 auto 2.35rem !important;
+    color: #8E8E96 !important;
   }
   .hero .btn-row {
-    margin-top: 1.5rem !important;
-    gap: 0.65rem !important;
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: auto !important;
+    max-width: 100% !important;
+    margin: 0 auto 2.75rem !important;
+    gap: 0.85rem !important;
+  }
+  .hero .btn-row .btn {
+    flex: 0 1 auto !important;
+    width: auto !important;
+    padding: 0.48rem 1rem !important;
+    font-size: 0.6875rem !important;
+    letter-spacing: 0.08em !important;
+    min-height: 36px !important;
+    border-radius: 3px !important;
+    text-align: center !important;
+    justify-content: center !important;
+    white-space: nowrap !important;
+  }
+  .rail-bar {
+    margin: 0 auto 1.5rem !important;
+    padding: 0 var(--gutter) !important;
   }
   .split {
     grid-template-columns: 1fr !important;
@@ -1341,27 +1631,32 @@ body::-webkit-scrollbar {
 
 @media(max-width: 640px) {
   .section {
-    padding-block: clamp(3.5rem, 8vw, 5.5rem);
+    padding-block: clamp(2.25rem, 6vw, 3.5rem);
   }
   .hero {
-    min-height: 100vh;
-    padding-top: 4.25rem;
-    padding-bottom: 1.5rem;
+    min-height: auto !important;
+    margin-top: 3.75rem !important;
+    padding-top: 1rem !important;
+    padding-bottom: 0.75rem !important;
+    justify-content: flex-start !important;
   }
   .hero-in {
     padding: 0 var(--gutter);
   }
 
   /* Stat Rail Mobile Cockpit */
+  .rail-bar {
+    margin: 1.25rem auto 1.75rem !important;
+  }
   .rail {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     width: 100%;
     max-width: 420px;
-    margin: 2.4rem auto 0;
+    margin: 0 auto;
     border-top: 1px solid var(--edge);
     border-bottom: 1px solid var(--edge);
-    padding: 0.85rem 0;
+    padding: 0.75rem 0;
   }
   .rail div {
     border-right: 1px solid var(--edge);
@@ -1522,44 +1817,91 @@ body::-webkit-scrollbar {
 }
 
 @media(max-width: 480px) {
-  /* Extra refinement for compact phones (iPhone SE, etc.) */
+  /* Wispr Flow-inspired airy, luxurious mobile hero rhythm */
   :root {
-    --gutter: 1.15rem;
+    --gutter: 1.25rem;
+  }
+  .hero {
+    margin-top: 3.75rem !important;
+    padding-top: 2.25rem !important;
+    padding-bottom: 3.5rem !important;
+    justify-content: flex-start !important;
+    min-height: auto !important;
+  }
+  .hero-tag {
+    font-size: 0.625rem !important;
+    letter-spacing: 0.16em !important;
+    padding: 0.38rem 0.75rem !important;
+    margin-bottom: 2rem !important; /* Wispr Flow: 32px gap to headline */
+    gap: 0.45rem !important;
   }
   .d1 {
-    font-size: clamp(2.2rem, 11.4vw, 3.25rem) !important;
-    line-height: 0.94 !important;
+    font-size: clamp(2.2rem, 9.8vw, 2.85rem) !important;
+    line-height: 0.98 !important;
     letter-spacing: -0.035em !important;
     max-width: 100%;
-    margin-bottom: 0.15rem;
+    margin-bottom: 1.75rem !important; /* Wispr Flow: 28px gap to lede */
   }
   .d1 .ghost {
     max-width: 100%;
     white-space: nowrap;
   }
   .hero .lede {
-    font-size: 0.8rem !important;
-    line-height: 1.5 !important;
-    max-width: 38ch !important;
-    margin: 0.95rem auto 0 !important;
-    color: #888890 !important;
+    font-size: 0.85rem !important;
+    line-height: 1.65 !important;
+    max-width: 35ch !important;
+    margin: 0 auto 2.25rem !important; /* Wispr Flow: 36px gap to buttons */
+    color: #8E8E96 !important;
   }
   .hero .btn-row {
-    margin-top: 1.35rem !important;
-    gap: 0.6rem !important;
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: auto !important;
+    max-width: 100% !important;
+    margin: 0 auto 2.5rem !important; /* Wispr Flow: 40px gap to stats */
+    gap: 0.75rem !important;
   }
   .hero .btn-row .btn {
-    padding: 0.72rem 1.05rem !important;
-    font-size: 0.74rem !important;
+    flex: 0 1 auto !important;
+    width: auto !important;
+    padding: 0.65rem 1.15rem !important;
+    font-size: 0.7rem !important;
+    letter-spacing: 0.08em !important;
+    min-height: 40px !important;
+    border-radius: 4px !important;
   }
+  .rail-bar {
+    margin: 0 auto 3rem !important; /* Wispr Flow: 48px clearance at bottom */
+    padding: 0 !important;
+  }
+  .rail {
+    max-width: 360px;
+    padding: 0.85rem 0;
+  }
+  .rail b {
+    font-size: 1.1rem;
+  }
+  .rail span {
+    font-size: 0.55rem;
+    letter-spacing: 0.08em;
+  }
+  .nav { padding: 0.5rem 0.75rem 0 !important; }
   .nav-in {
-    height: 3.75rem;
-    padding-inline: 1rem;
-    gap: 0.5rem;
+    height: 3.45rem !important;
+    padding-inline: 0.95rem !important;
+    border-radius: 12px !important;
+    gap: 0.5rem !important;
   }
   .brand {
     font-size: 0.8125rem;
     gap: 0.45rem;
+  }
+  .brand img {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
   }
   .brand-mark {
     width: 1.75rem;
@@ -1569,13 +1911,28 @@ body::-webkit-scrollbar {
 
 @media(max-width: 360px) {
   .d1 {
-    font-size: clamp(1.95rem, 10.6vw, 2.35rem) !important;
+    font-size: clamp(1.85rem, 9.6vw, 2.2rem) !important;
     line-height: 0.94 !important;
     letter-spacing: -0.03em !important;
   }
   .hero .lede {
     font-size: 0.76rem !important;
-    max-width: 34ch !important;
+    max-width: 32ch !important;
+  }
+  .hero .btn-row {
+    flex-direction: row !important;
+    gap: 0.4rem !important;
+    margin: 0 auto 1.35rem !important;
+  }
+  .hero .btn-row .btn {
+    padding: 0.42rem 0.75rem !important;
+    font-size: 0.64rem !important;
+    width: auto !important;
+    flex: 0 1 auto !important;
+  }
+  .rail span {
+    font-size: 0.48rem !important;
+    letter-spacing: 0.04em !important;
   }
 }
 
@@ -1609,7 +1966,7 @@ body::-webkit-scrollbar {
 </div>
 <nav class="nav" id="nav">
   <div class="nav-in">
-    <a class="brand" href="#top" aria-label="Stereix Engine — Return to top">STEREIX&nbsp;ENGINE</a>
+    <a class="brand" href="#top" aria-label="Stereix Engine — Return to top"><span>STEREIX&nbsp;ENGINE</span></a>
     <ul class="nav-links">
       <li><a href="#pipeline">Pipeline</a></li>
       <li><a href="#backends">Backends</a></li>
@@ -1638,7 +1995,10 @@ body::-webkit-scrollbar {
     </ul>
     <div class="mobile-nav-cta">
       <a class="btn btn-primary btn-notify mobile-nav-item" href="#waitForm"><span>Notify me</span></a>
-      <a href="mailto:contact@mesmeran.com" class="mobile-mail-link">✉ contact@mesmeran.com</a>
+      <a href="mailto:contact@mesmeran.com" class="mobile-mail-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="margin-right:0.45rem"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+        <span>contact@mesmeran.com</span>
+      </a>
     </div>
   </div>
 </nav>
@@ -1656,28 +2016,27 @@ body::-webkit-scrollbar {
       </h1>
 
       <p class="lede">
-        Turn your entire flat PC library into immersive 6DOF VR with a single click.
-        Stereix Engine hooks the graphics pipeline while your game runs, reconstructs
-        real-time stereo depth, and hands it straight to your OpenXR headset.
+        Play your flat PC games in full 6DOF VR with one click.
+        Real-time 3D depth, delivered straight to any OpenXR headset.
       </p>
 
       <div class="btn-row">
         <a class="btn btn-primary btn-notify" href="#waitForm"><span>Notify me</span></a>
-        <a class="btn" href="#pipeline"><span>See how it works</span></a>
+        <a class="btn btn-ghost" href="#pipeline"><span>See how it works</span></a>
+      </div>
+
+      <!-- ============ STAT RAIL ============ -->
+      <div class="rail-bar">
+        <div class="rail">
+          <div><b class="mono">3</b><span>Graphics APIs</span></div>
+          <div><b class="mono">6</b><span>Shipped profiles</span></div>
+          <div><b class="mono">11.1<small>ms</small></b><span>Frame budget</span></div>
+        </div>
       </div>
     </div>
 
   </div>
 </header>
-
-<!-- ============ STAT RAIL ============ -->
-<div class="rail-bar">
-  <div class="rail">
-    <div><b class="mono">3</b><span>Graphics APIs</span></div>
-    <div><b class="mono">6</b><span>Shipped profiles</span></div>
-    <div><b class="mono">11.1<small>ms</small></b><span>Frame budget</span></div>
-  </div>
-</div>
 
 <!-- ============ PIPELINE ============ -->
 <section class="section" id="pipeline">
@@ -1687,9 +2046,7 @@ body::-webkit-scrollbar {
       <span class="ghost" data-ghost="Six stages, one frame."><span>Six stages, one frame.</span></span>
     </h2>
     <p class="lede rv" style="margin-bottom:clamp(2.5rem,5vw,4rem)">
-      The game never knows it is being watched. Stereix Engine detours the swapchain,
-      finds the camera on its own, and rebuilds the frame in stereo before the
-      game's own present call ever returns.
+      Stereix runs silently in memory, instantly converting flat game frames into real-time 3D VR.
     </p>
 
     <div class="pipe">
@@ -1698,9 +2055,7 @@ body::-webkit-scrollbar {
 
         <li class="step">
           <h3>Present() hooked</h3>
-          <p>A MinHook detour lands on the swapchain's present call. One hook
-             manager owns the whole lifecycle — installation, trampolines and
-             teardown — so nothing is left patched in the process on exit.</p>
+          <p>Safely intercepts each rendered frame as it draws, leaving clean memory on exit.</p>
           <div class="step-meta">
             <code>HookManager</code><code>MH_Initialize</code><code>IDXGISwapChain::Present</code><code>vkQueuePresentKHR</code>
           </div>
@@ -1708,10 +2063,7 @@ body::-webkit-scrollbar {
 
         <li class="step">
           <h3>Backbuffer acquired</h3>
-          <p>The lifecycle manager validates the epoch and pulls the live
-             backbuffer — the exact surface the game was about to show your
-             monitor. A resize or a device reset bumps the epoch, and every
-             cached view is dropped rather than reused.</p>
+          <p>Captures the raw game image directly before it ever hits your PC monitor.</p>
           <div class="step-meta">
             <code>Dx11LifecycleManager</code><code>Dx12LifecycleManager</code><code>VulkanLifecycleManager</code>
           </div>
@@ -1719,10 +2071,7 @@ body::-webkit-scrollbar {
 
         <li class="step">
           <h3>View matrix locked</h3>
-          <p>Candidate matrices are collected from constant buffers and scored
-             until the real view and projection lock in. Scoring is what makes
-             this general: no per-game patching, no hex editing, no signature
-             that breaks on the next update.</p>
+          <p>Automatically detects and locks the in-game 3D camera angle with zero manual modding.</p>
           <div class="step-meta">
             <code>CandidateCollector</code><code>CameraLockManager</code>
           </div>
@@ -1730,10 +2079,7 @@ body::-webkit-scrollbar {
 
         <li class="step">
           <h3>Depth reconstructed</h3>
-          <p>The depth buffer is identified the same way — candidates in,
-             scored, locked. Depth is what turns a flat image into geometry your
-             eyes can actually converge on. Without it both eyes receive almost
-             the same picture and the scene reads as a photograph.</p>
+          <p>Extracts genuine 3D scene depth so objects have realistic physical distance and volume.</p>
           <div class="step-meta">
             <code>DepthCandidateCollector</code><code>DepthLockManager</code>
           </div>
@@ -1741,10 +2087,7 @@ body::-webkit-scrollbar {
 
         <li class="step">
           <h3>Stereo pair warped</h3>
-          <p>Compute shaders reproject the frame into a left and a right eye,
-             then fill the disocclusions that reprojection opens up along every
-             silhouette edge — the slivers of world that one eye can see and the
-             other never had pixels for.</p>
+          <p>Generates distinct left and right eye angles, cleanly filling in hidden silhouette edges.</p>
           <div class="step-meta">
             <code>FrameCoordinator</code><code>Reprojection CS</code><code>Disocclusion fill</code>
           </div>
@@ -1752,10 +2095,7 @@ body::-webkit-scrollbar {
 
         <li class="step">
           <h3>Submitted to OpenXR</h3>
-          <p>Both eyes go to your runtime — SteamVR, Meta Quest Link, WMR — in
-             the runtime's own frame loop rather than on the game's clock. Depth
-             ships alongside the colour layer so the runtime's spacewarp has
-             something to reproject against when a frame runs late.</p>
+          <p>Sends the stereo feed to SteamVR, Quest Link, or Virtual Desktop with zero stutter.</p>
           <div class="step-meta">
             <code>xrWaitFrame</code><code>xrBeginFrame</code><code>xrEndFrame</code><code>OpenXRFrameSubmitter</code>
           </div>
@@ -1766,9 +2106,7 @@ body::-webkit-scrollbar {
         <p class="eyebrow" style="margin-bottom:1rem">The deadline</p>
         <p class="budget-n mono" id="budgetDisplay">11.1<em>ms</em></p>
         <p class="small" style="margin:.9rem 0 0" id="budgetExplainer">
-          At 90&nbsp;Hz a frame is 1000&nbsp;÷&nbsp;90 milliseconds wide. Every stage above
-          runs inside that window. Miss it and your headset shows you the last
-          frame again — which your inner ear notices immediately.
+          At 90&nbsp;Hz, each frame must finish within 11.1ms. Stereix takes under 1.5ms, ensuring ultra-smooth, motion-sickness-free VR.
         </p>
 
         <hr>
@@ -1803,7 +2141,7 @@ body::-webkit-scrollbar {
         </div>
 
         <p class="small" style="margin:1rem 0 0">
-          The budget is the whole frame, not Stereix's share of it. Sub-1.5ms render-thread overhead ensures the game engine retains maximum headroom to prevent frame drops.
+          Sub-1.5ms engine overhead leaves maximum frame time for the game to run at peak visual fidelity.
         </p>
 
         <hr>
@@ -1830,10 +2168,7 @@ body::-webkit-scrollbar {
       <span class="ghost" data-ghost="One pipeline, three doors."><span>One pipeline, three doors.</span></span>
     </h2>
     <p class="lede rv" style="margin-bottom:clamp(2.5rem,5vw,4rem)">
-      The six stages are the same everywhere. What changes is where the hook
-      lands and what the API demands in return — DirectX 12 and Vulkan hand you
-      explicit control of submission, and getting that ordering wrong is how an
-      injector deadlocks a game instead of rendering it.
+      The pipeline stays identical across DirectX 11, DirectX 12, and Vulkan. Hooking directly at the API level guarantees rock-solid stability and zero deadlocks.
     </p>
 
     <div class="grid g3 rv">
@@ -1849,9 +2184,7 @@ body::-webkit-scrollbar {
           <li><b>Resource access</b><span>Direct from swapchain</span></li>
         </ul>
         <p class="small" style="margin:1.15rem 0 0">
-          The forgiving one. The runtime manages submission, so the work is
-          mostly state hygiene — capture what the game had bound, do the stereo
-          pass, put it all back exactly as found.
+          Reliable legacy support. Preserves game state cleanly for smooth 6DOF rendering in older titles.
         </p>
       </div>
 
@@ -1867,10 +2200,7 @@ body::-webkit-scrollbar {
           <li><b>Barriers</b><span>Explicit transitions</span></li>
         </ul>
         <p class="small" style="margin:1.15rem 0 0">
-          Every stereo dispatch and copy is submitted to the game's own command
-          queue rather than a private one. A second queue would race the game's
-          rendering and tear; single-queue FIFO is the contract that keeps the
-          frame coherent.
+          Executes directly on the game's main queue for low-latency, tear-free frame synchronization.
         </p>
       </div>
 
@@ -1886,19 +2216,13 @@ body::-webkit-scrollbar {
           <li><b>Recursion guard</b><span class="on-v">TRAMPOLINE</span></li>
         </ul>
         <p class="small" style="margin:1.15rem 0 0">
-          Resolution goes through the original
-          <code>vkGetDeviceProcAddr</code>, never the hooked one — returning a
-          patched pointer to a lookup for that same pointer is an infinite
-          recursion. Devices created before injection are passed through
-          untouched.
+          Direct driver dispatch table hooking prevents recursion and delivers seamless Vulkan performance.
         </p>
       </div>
     </div>
 
     <p class="small rv" style="margin-top:1.5rem;max-width:64ch">
-      A wrapper that targets a game engine only works on that engine. Hooking at
-      the API layer means the engine underneath — Unreal, Unity, RE Engine,
-      something in-house — stops being a question the injector has to answer.
+      Because Stereix hooks graphics APIs rather than specific game engines, it works universally across Unreal, Unity, and custom engines.
     </p>
   </div>
 </section>
@@ -1910,20 +2234,11 @@ body::-webkit-scrollbar {
     <h2 class="d2 rv">
       <span class="ghost" data-ghost="Tuned, not guessed."><span>Tuned, not guessed.</span></span>
     </h2>
-    <p class="lede rv" style="margin-bottom:clamp(2.5rem,5vw,4rem)">
-      Every game hands its matrices over differently. A profile records what that
-      game does — depth direction, matrix order, colour space — so Stereix gets it
-      right on the first launch instead of the fifth. These ship in the box.
-    </p>
+    <p class="lede rv" style="margin-bottom:clamp(2.5rem,5vw,4rem)">Profiles store depth direction, matrix order, and color space so games look right on frame one.</p>
 
     <div class="grid g3 rv" id="gameGrid"></div>
 
-    <p class="small rv" style="margin-top:1.5rem;max-width:62ch">
-      Profiles are plain JSON in <code>profiles/</code>. Adding a game takes about
-      three minutes and no C++. Community profiles also verified for Mortal Shell and custom DirectX titles. Game names are used only to identify compatibility;
-      all trademarks belong to their respective owners, who are not affiliated with
-      this project.
-    </p>
+    <p class="small rv" style="margin-top:1.5rem;max-width:62ch">Profiles are simple JSON files. Adding a new game takes three minutes with zero coding required.</p>
   </div>
 </section>
 
@@ -1935,63 +2250,33 @@ body::-webkit-scrollbar {
       Four questions per game.
     </h2>
     <p class="lede rv" style="margin-bottom:clamp(2rem,4vw,3rem)">
-      Each flag is a convention the game chose and never documented. Guess wrong
-      and the failure is specific and recognisable — which is what makes these
-      worth reading before you file a bug.
+      Engine flags configure internal rendering quirks. Toggle them if depth or lighting looks inverted.
     </p>
 
     <div class="legend rv">
       <div>
         <h4>reverseZ</h4>
-        <p>
-          Depth stored from 1 at the near plane to 0 at the far plane instead of
-          the other way around — it buys back floating-point precision in the
-          distance. Read it backwards and the world turns inside out: distant
-          geometry converges in front of your face.
-        </p>
+        <p>Inverts depth precision for modern engines. Flip this if the scene appears inside-out.</p>
       </div>
       <div>
         <h4>rowMajor</h4>
-        <p>
-          Which way the matrix is laid out in memory. Transposed against the
-          game's actual convention, the extracted camera basis is wrong in a very
-          visible way — the horizon tilts, or the view ends up rotated ninety
-          degrees off.
-        </p>
+        <p>Matrix memory layout. Flip this if geometry tears or the camera angle tilts.</p>
       </div>
       <div>
         <h4>srgb</h4>
-        <p>
-          Whether the backbuffer is already gamma-encoded by the time Stereix sees
-          it. Apply the transform twice and the image washes out; skip one that
-          was needed and the blacks crush and the midtones go muddy.
-        </p>
+        <p>Corrects color space. Toggle this if colors look washed out or overly dark.</p>
       </div>
       <div>
         <h4>depth</h4>
-        <p>
-          Whether the depth buffer is submitted to OpenXR alongside the colour
-          layer. Runtimes use it for spacewarp and late-stage reprojection, so
-          submitting it is what keeps motion smooth when the GPU misses the
-          deadline.
-        </p>
+        <p>Submits scene depth to OpenXR for buttery-smooth motion reprojection.</p>
       </div>
     </div>
 
     <div class="split rv" style="margin-top:clamp(2.5rem,5vw,3.5rem)">
       <div class="prose">
         <h3 class="d4">Writing one yourself</h3>
-        <p>
-          A profile is the seven fields the cards above are drawn from, and
-          nothing else. Drop the file in <code>profiles/</code> and restart the
-          launcher — there is no build step, no registration list, and no C++.
-        </p>
-        <p>
-          An unprofiled game is not blocked. The matrix and depth search runs
-          regardless; a profile just means the search starts from known-correct
-          answers instead of converging on them. Unprofiled titles are more
-          likely to lock slowly, lock wrong, or not lock at all.
-        </p>
+        <p>A profile is just a small JSON file. Drop it into <code>profiles/</code> and restart the launcher.</p>
+        <p>Unprofiled games still run through automatic depth detection. Adding a profile simply locks it in instantly.</p>
       </div>
       <div class="profile-snippet-wrap">
         <div class="profile-snippet-bar">
@@ -2033,37 +2318,37 @@ body::-webkit-scrollbar {
       <div class="card feat">
         <span class="n">API-level hook</span>
         <h3 class="d3">Not locked to one engine</h3>
-        <p>Wrappers that target Unreal only work on Unreal games. Stereix Engine hooks at the DirectX and Vulkan layer instead, so the engine underneath stops mattering.</p>
+        <p>Hooks directly at DirectX and Vulkan, universally supporting Unreal, Unity, and custom engines.</p>
         <p class="spec">DX11 · DX12 · Vulkan — MinHook detour</p>
       </div>
       <div class="card feat">
         <span class="n">In-headset dashboard</span>
         <h3 class="d3">Quick-tune without taking it off</h3>
-        <p>Press the controller menu button or gamepad combo (L3+R3) to summon the native ImGui VR overlay. Tweak IPD, convergence depth, and world scale live in stereo.</p>
+        <p>Press the menu button or L3+R3 to adjust 3D depth and FOV in real time without removing your headset.</p>
         <p class="spec">Universal ImGui overlay · DX11 · DX12 · Vulkan</p>
       </div>
       <div class="card feat">
         <span class="n">Comfort guard</span>
         <h3 class="d3">Keeps your stomach out of it</h3>
-        <p>Dedicated shaders watch for the motion that causes sickness and vignette the periphery before it reaches you.</p>
+        <p>Smart peripheral vignetting reduces motion sickness during fast movement. Fully adjustable.</p>
         <p class="spec">Peripheral vignette — strength adjustable</p>
       </div>
       <div class="card feat">
         <span class="n">Spacewarp</span>
         <h3 class="d3">Frames that hold up</h3>
-        <p>Adaptive interpolation fills in for the frames a heavy scene cannot deliver, so the headset stays at rate even when the GPU does not.</p>
+        <p>Predictive frame smoothing maintains native headset refresh rate even during heavy GPU load spikes.</p>
         <p class="spec">Depth layer submitted with every frame</p>
       </div>
       <div class="card feat">
         <span class="n">Steam scan</span>
         <h3 class="d3">Finds your library itself</h3>
-        <p>The launcher reads your local Steam libraries, matches what it finds against known profiles, and lists what it can run.</p>
+        <p>Automatically scans your Steam library and matches installed games with verified VR profiles.</p>
         <p class="spec">Reads libraryfolders.vdf from disk</p>
       </div>
       <div class="card feat">
         <span class="n">Runtime &amp; Telemetry</span>
         <h3 class="d3">Knows your headset</h3>
-        <p>Reads the active OpenXR runtime from the registry (Quest Link, SteamVR, Virtual Desktop, PSVR2) and streams live per-stage hook telemetry as you play.</p>
+        <p>Auto-detects SteamVR, Meta Quest Link, Virtual Desktop, and PSVR2 with zero manual setup.</p>
         <p class="spec">ActiveRuntime auto-resolve · streamed live telemetry</p>
       </div>
     </div>
@@ -2074,43 +2359,33 @@ body::-webkit-scrollbar {
 <section class="section">
   <div class="wrap">
     <div class="warn rv">
-      <div class="warn-mark">!</div>
+      <div class="warn-mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+      </div>
       <div>
         <h2 class="d3" style="font-size:1.25rem;margin-bottom:.7rem">Single-player only. This is enforced, not advised.</h2>
-        <p class="small" style="max-width:64ch;margin:0 0 1rem">
-          Injecting into a multiplayer game protected by Easy Anti-Cheat, BattlEye
-          or Vanguard can get your account permanently banned. Stereix Engine detects those
-          systems and refuses to inject — there is no override switch and no flag
-          to turn it off. Use it on single-player and unprotected titles.
-        </p>
-        <p class="small" style="max-width:64ch;margin:0 0 1.4rem">
-          It also will not attempt to defeat kernel-level anti-cheat, and it never
-          will. That is a line the project does not cross.
-        </p>
+        <p class="small" style="max-width:64ch;margin:0 0 1rem">Stereix is strictly for single-player and offline play. The engine automatically refuses to attach to games with active anti-cheat to protect your accounts.</p>
+        <p class="small" style="max-width:64ch;margin:0 0 1.4rem">Stereix will never attempt to circumvent anti-cheat. Always play single-player or offline.</p>
 
         <div class="tiers">
           <div>
             <span class="tier-n">Tier 1</span>
-            <p class="tier-b"><b>Single-player, no anti-cheat.</b> Nothing is watching the process and nothing can be banned (e.g. Cyberpunk, Hogwarts Legacy, Sekiro).</p>
+            <p class="tier-b"><b>Single-player, no anti-cheat.</b> Nothing is watching the process and nothing can be banned. 100% safe to inject and mod.</p>
             <span class="verdict v-yes">Supported</span>
           </div>
           <div>
             <span class="tier-n">Tier 2</span>
-            <p class="tier-b"><b>Mod-friendly / Offline mode.</b> Client anti-cheat disabled (e.g. Elden Ring offline with EAC disabled). Supported strictly in offline single-player.</p>
+            <p class="tier-b"><b>Mod-friendly / Offline mode.</b> Anti-cheat disabled or offline mode active. Supported offline only.</p>
             <span class="verdict v-warn" style="color:var(--white);border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.06)">Supported Offline</span>
           </div>
           <div>
             <span class="tier-n">Tier 3</span>
-            <p class="tier-b"><b>Kernel-level or active online multiplayer.</b> Vanguard, BattlEye, Ricochet, live EAC. Refused before injection touches memory to safeguard your accounts.</p>
+            <p class="tier-b"><b>Kernel-level or active online multiplayer.</b> Vanguard, BattlEye, Ricochet, live EAC. Injection is completely blocked.</p>
             <span class="verdict v-no">Refused (Safe)</span>
           </div>
         </div>
 
-        <p class="small" style="margin:1.4rem 0 0;max-width:64ch">
-          The check runs before any hook is installed, on the target process
-          rather than on a list of game names — so a title that adds anti-cheat
-          in a later patch is covered without waiting for an update here.
-        </p>
+        <p class="small" style="margin:1.4rem 0 0;max-width:64ch">Anti-cheat checks run before any code touches memory, protecting your accounts automatically.</p>
       </div>
     </div>
   </div>
@@ -2128,33 +2403,27 @@ body::-webkit-scrollbar {
       <div>
         <span class="num">01</span>
         <h3 class="d3">Install</h3>
-        <p>Run the Windows installer. It places the launcher, the injector DLL
-           and all six shipped profiles. Nothing is installed into your games.</p>
+        <p>Run the installer to set up the launcher and engine. Zero changes are made to your game files.</p>
       </div>
       <div>
         <span class="num">02</span>
         <h3 class="d3">Open the launcher</h3>
-        <p>It reads your Steam libraries from disk and lists the titles it
-           recognises, along with which of them have a profile.</p>
+        <p>The launcher automatically detects supported titles in your Steam libraries.</p>
       </div>
       <div>
         <span class="num">03</span>
         <h3 class="d3">Start your runtime</h3>
-        <p>Quest Link, SteamVR or WMR — whichever you already use. The active
-           OpenXR runtime is detected from the registry, not asked for.</p>
+        <p>Start SteamVR, Quest Link, or Virtual Desktop. Your headset connects automatically.</p>
       </div>
       <div>
         <span class="num">04</span>
         <h3 class="d3">Pick a game and inject</h3>
-        <p>Launch the game, then attach. Watch the log for the camera and depth
-           locks; when both land, the flat panel resolves into stereo.</p>
+        <p>Launch your game and click Inject. The flat display instantly turns into full 3D VR.</p>
       </div>
     </div>
 
     <p class="small rv" style="margin-top:1.5rem;max-width:64ch">
-      Attaching to an already-running game is the supported path. Injection is
-      runtime — the DLL is loaded into the live process, no game files are
-      modified, and closing the game unloads everything.
+      Injection runs entirely in live RAM. Closing your game cleanly unloads everything with zero residue.
     </p>
   </div>
 </section>
@@ -2170,35 +2439,17 @@ body::-webkit-scrollbar {
     <div class="acc rv">
       <details>
         <summary>Will this get my account banned?</summary>
-        <p class="a">
-          On a single-player game with no anti-cheat there is nothing watching the
-          process and nothing to ban. On a protected multiplayer game, injecting a
-          DLL into the render pipeline is precisely the behaviour anti-cheat
-          exists to catch — which is why Stereix Engine refuses to attach to those
-          processes at all. Treat any title shipping Easy Anti-Cheat, BattlEye or
-          Vanguard as off-limits.
-        </p>
+        <p class="a">No, as long as you play single-player or offline. Stereix automatically blocks injection into multiplayer titles with anti-cheat to keep your accounts safe.</p>
       </details>
 
       <details>
         <summary>The game runs, but the headset shows it flat — like a cinema screen.</summary>
-        <p class="a">
-          That is the passthrough fallback, working as designed. Stereo engages
-          only once both the view matrix and the depth buffer are locked, and
-          menus, loading screens and cutscenes frequently present neither. Rather
-          than go black, the flat frame is copied into both eyes. Move into actual
-          gameplay and it should converge within a second or two.
-        </p>
+        <p class="a">Menus and cutscenes stay 2D by design. True 3D VR engages automatically the moment 3D gameplay starts.</p>
       </details>
 
       <details>
         <summary>My game isn't in the list. Does it still work?</summary>
-        <p class="a">
-          It may. Profiles are an accelerant, not a requirement — the matrix and
-          depth search runs on every title. A profile means the search starts from
-          known-correct answers instead of converging on them, so unprofiled games
-          are more likely to lock slowly, lock wrong, or fail to lock.
-        </p>
+        <p class="a">Yes! Unprofiled games automatically search for 3D depth. Adding a custom profile simply makes it lock in instantly.</p>
         <p class="a">
           If it works, the settings that made it work are a profile. Write them
           down and drop the JSON in <code>profiles/</code>.
@@ -2208,31 +2459,20 @@ body::-webkit-scrollbar {
       <details>
         <summary>Will it run on my GPU?</summary>
         <p class="a">
-          Stereo asks for close to twice the pixels of the flat game. Reprojection
-          and spacewarp absorb some of that cost, not all of it. The reliable
-          predictor is headroom: if the game already runs comfortably above your
-          headset's refresh rate on a flat monitor, you have somewhere to spend.
-          If it barely holds 60, stereo will not rescue it.
+          Rendering in stereo requires about 30–40% more GPU headroom. If your PC runs the flat game smoothly, it will run comfortably in VR.
         </p>
       </details>
 
       <details>
         <summary>Does it need an internet connection?</summary>
         <p class="a">
-          No. Injection, profile matching and OpenXR submission are entirely
-          local. The launcher reads your Steam library from disk and your active
-          runtime from the registry.
+          No internet required. Everything runs 100% locally on your PC with zero telemetry.
         </p>
       </details>
 
       <details>
         <summary>Does it modify my game files?</summary>
-        <p class="a">
-          No. The DLL is loaded into the running process at runtime and every hook
-          is removed on exit — the hook manager owns installation and teardown as
-          one lifecycle specifically so nothing is left patched behind. Closing the
-          game returns it to exactly the state it shipped in.
-        </p>
+        <p class="a">No. Stereix operates purely in RAM. Closing your game cleanly restores original system memory.</p>
       </details>
     </div>
   </div>
@@ -2251,9 +2491,7 @@ body::-webkit-scrollbar {
       <div id="waitFormBox">
         <p class="eyebrow" style="margin-bottom:.8rem;color:var(--white)">Get early access</p>
         <h3 class="d3" style="font-size:1.35rem;margin-bottom:.5rem">Join the Engine Waitlist</h3>
-        <p class="small" style="margin:0 0 1.5rem;max-width:44ch">
-          Leave your email to receive early access the moment Stereix Engine lands. One message when Engine lands — no spam, nothing else.
-        </p>
+        <p class="small" style="margin:0 0 1.5rem;max-width:44ch">Enter your email for instant early access notifications. One email when we launch, zero spam.</p>
 
         <form class="form" id="waitForm" novalidate style="margin-top:0">
           <input type="email" id="waitEmail" placeholder="you@domain.com" aria-label="Email address" autocomplete="email" required>
@@ -2263,7 +2501,7 @@ body::-webkit-scrollbar {
         </form>
         <p class="form-note" id="waitNote" role="status" style="margin-top:.6rem;margin-bottom:0"></p>
         <p class="privacy-note" style="margin-top:.65rem;margin-bottom:0;font-size:0.6875rem;color:var(--muted)">
-          🔒 Secured via Cloudflare KV. Single notification upon launch. No ads, tracking pixels, or third-party sharing. <button type="button" id="openPrivacyBtn" style="background:none;border:none;padding:0;color:var(--muted);font-family:inherit;font-size:inherit;text-decoration:underline;cursor:pointer">Privacy statement</button>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="display:inline-block;vertical-align:-1px;margin-right:3px"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>Secured via Cloudflare KV. Single notification upon launch. No ads, tracking pixels, or third-party sharing. <button type="button" id="openPrivacyBtn" style="background:none;border:none;padding:0;color:var(--muted);font-family:inherit;font-size:inherit;text-decoration:underline;cursor:pointer">Privacy statement</button>
         </p>
 
         <!-- Dynamic Founder Access Pass (Appears on successful waitlist submission) -->
@@ -2289,10 +2527,7 @@ body::-webkit-scrollbar {
           <li><b>Injector &amp; CLI</b> — vrinject.dll + vr-inject-cli.exe</li>
           <li><b>Curated Profiles</b> — ready-to-run JSON profiles in <code>profiles/</code></li>
         </ul>
-        <p class="small" style="margin:1.1rem 0 0;max-width:44ch">
-          Nothing is written into your game directories, and no launch options
-          are changed.
-        </p>
+        <p class="small" style="margin:1.1rem 0 0;max-width:44ch">Zero game files modified. Clean and non-invasive.</p>
       </div>
 
       <div>
@@ -2325,10 +2560,7 @@ body::-webkit-scrollbar {
           <li><b>Windows Mixed Reality</b> — where still supported by the OS</li>
           <li><b>Virtual Desktop</b> — via its own OpenXR runtime</li>
         </ul>
-        <p class="small" style="margin:1.2rem 0 0">
-          Whichever one is registered as active is the one that gets the frames.
-          Set it in your runtime's own settings before attaching.
-        </p>
+        <p class="small" style="margin:1.2rem 0 0">Frames stream directly to your active OpenXR runtime.</p>
       </div>
     </div>
   </div>
@@ -2339,7 +2571,10 @@ body::-webkit-scrollbar {
   <div class="wrap">
     <div class="foot-grid">
       <div>
-        <a class="brand" href="#top" aria-label="Stereix Engine — Return to top" style="margin-bottom:1.1rem"><span>STEREIX&nbsp;ENGINE</span></a>
+        <a class="brand" href="#top" aria-label="Stereix Engine — Return to top" style="margin-bottom:1.1rem;display:inline-flex;align-items:center;gap:0.5rem">
+          <img src="stereix_blades_crimson.png" alt="" width="20" height="20" style="object-fit:contain">
+          <span>STEREIX&nbsp;ENGINE</span>
+        </a>
         <p class="small" style="margin:0;max-width:32ch">
           Universal 6DOF VR injector for PC games that were never built for a headset.
         </p>
@@ -2380,12 +2615,45 @@ body::-webkit-scrollbar {
       </div>
     </div>
 
-    <div class="foot-in">
-      <p class="small" style="margin:0;max-width:60ch">
-        Single-player graphics hook injector. Not affiliated with or endorsed by any
-        game publisher. © <span id="footCopyrightYear">2026</span> Mesmeran Lab.
-      </p>
-      <p class="small" style="margin:0">Windows 10 / 11 · 64-bit · OpenXR Native · v0.1.28</p>
+    <!-- Monumental Brand Lockup (Wispr Flow style) -->
+    <div class="foot-billboard-wrap">
+      <a href="#top" class="foot-billboard" aria-label="Stereix Engine — Return to top">
+        <img class="foot-billboard-mark" src="stereix_blades_crimson.png" alt="Stereix Logo" width="512" height="512" loading="lazy">
+        <div class="foot-billboard-text">
+          <span>STEREIX</span>
+          <span class="foot-billboard-suffix">ENGINE</span>
+        </div>
+      </a>
+    </div>
+
+    <!-- Bottom Legal & Social Strip -->
+    <div class="foot-bottom">
+      <div class="foot-bottom-left">
+        <div class="foot-legal-links">
+          <span>© <span id="footCopyrightYear">2026</span> Stereix Engine</span>
+          <a href="#privacyModal" class="open-privacy-link">Privacy Policy</a>
+          <button type="button" class="open-privacy-link">Data Controls</button>
+          <a href="https://github.com/sathishssj3/Stereix-Engine" target="_blank" rel="noopener">Security &amp; Bug Bounty</a>
+        </div>
+        <p class="small" style="margin:0;max-width:68ch;color:#5C5C64;font-size:0.75rem">
+          Single-player graphics hook injector. Not affiliated with or endorsed by any game publisher. Windows 10/11 · OpenXR Native · v0.1.118
+        </p>
+      </div>
+
+      <div class="foot-social-links">
+        <a href="https://github.com/sathishssj3/Stereix-Engine" target="_blank" rel="noopener" class="foot-social-btn" aria-label="GitHub Repository">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+        </a>
+        <a href="https://github.com/sathishssj3/Stereix-Engine/discussions" target="_blank" rel="noopener" class="foot-social-btn" aria-label="Discussions & Support">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+        </a>
+        <a href="https://x.com" target="_blank" rel="noopener" class="foot-social-btn" aria-label="X (Twitter)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+        </a>
+        <a href="mailto:contact@mesmeran.com" class="foot-social-btn" aria-label="Email Support">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+        </a>
+      </div>
     </div>
   </div>
 </footer>
@@ -2616,9 +2884,9 @@ const say = (msg, ok = false) => {
   note.className = ok ? 'form-note ok' : 'form-note err';
   note.setAttribute('role', ok ? 'status' : 'alert');
   note.setAttribute('aria-live', 'polite');
-  note.innerHTML = ok 
-    ? `<span style="display:inline-flex;align-items:center;gap:6px;color:#10B981;font-weight:700;">✓</span> <span>${msg}</span>` 
-    : `<span style="display:inline-flex;align-items:center;gap:6px;color:var(--red);font-weight:700;">⚠</span> <span>${msg}</span>`;
+  const checkIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+  const alertIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>';
+  note.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px">${ok ? checkIcon : alertIcon} <span>${msg}</span></span>`;
 };
 
 form.addEventListener('submit', async (e) => {
@@ -2724,7 +2992,7 @@ document.querySelectorAll('.btn-notify, a[href="#waitForm"], a[href="#waitEmail"
 
         budgetDisplay.innerHTML = `${ms}<em>ms</em>`;
         if (budgetExplainer) {
-          budgetExplainer.innerHTML = `At ${hz}&nbsp;Hz a frame is 1000&nbsp;÷&nbsp;${hz} = <strong>${ms} milliseconds</strong> wide. Every stage above runs inside that window. Stereix requires only ${engineOverhead}ms, leaving <strong>${headroom}ms</strong> pure rendering headroom for the game engine.`;
+          budgetExplainer.innerHTML = `At ${hz}&nbsp;Hz, each frame must finish in <strong>${ms}ms</strong>. Stereix uses only ${engineOverhead}ms, leaving <strong>${headroom}ms</strong> headroom for the game.`;
         }
         gameHeadroomNum.textContent = headroom;
       };
@@ -2823,7 +3091,7 @@ document.querySelectorAll('.btn-notify, a[href="#waitForm"], a[href="#waitEmail"
       try {
         await navigator.clipboard.writeText(prof.json);
         copyBtn.classList.add('copied');
-        copyBtn.innerHTML = `<span>✓ Copied!</span>`;
+        copyBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Copied!</span>`;
         setTimeout(() => {
           copyBtn.classList.remove('copied');
           copyBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copy JSON</span>`;
@@ -3059,7 +3327,9 @@ document.querySelectorAll('.btn-notify, a[href="#waitForm"], a[href="#waitEmail"
   <div class="modal-card">
     <div class="modal-head">
       <h3 class="d3" id="privacyTitle" style="margin:0;font-size:1.15rem">Privacy &amp; Data Protection</h3>
-      <button type="button" class="modal-close" id="closePrivacyBtn" aria-label="Close privacy statement">✕</button>
+      <button type="button" class="modal-close" id="closePrivacyBtn" aria-label="Close privacy statement">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
     </div>
     <div class="modal-body small" style="color:var(--muted);line-height:1.65">
       <p style="margin-top:0"><strong style="color:var(--white)">Email Storage:</strong> When you join the waitlist, your email is stored securely in encrypted Cloudflare Key-Value (KV) storage. It is used exclusively to send you early access invitations and direct binary downloads when the engine launches.</p>

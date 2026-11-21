@@ -1,9 +1,11 @@
-export function VRStatusBar({ status, selectedGame, injectState, onInject, onUninstallMod }: any) {
+export function VRStatusBar({ status, selectedGame, injectState, calibrationSec, onInject, onUninstallMod }: any) {
   const isAntiCheat = selectedGame?.hasAntiCheat;
 
   const getButtonContent = () => {
     if (!selectedGame) return 'SELECT TARGET GAME';
     if (isAntiCheat) return 'ANTI-CHEAT BLOCKED';
+    if (injectState === 'calibrating') return calibrationSec ? `AI CALIBRATING (${calibrationSec}s)` : 'AI CALIBRATING...';
+    if (injectState === 'ready') return 'START GAME';
     if (injectState === 'injecting') return 'ABORT SEQUENCE';
     if (injectState === 'success') return 'SYSTEM ACTIVE';
     if (injectState === 'running') return 'CLOSE GAME';
@@ -27,8 +29,8 @@ export function VRStatusBar({ status, selectedGame, injectState, onInject, onUni
       WebkitBackdropFilter: 'blur(20px) saturate(150%)',
       boxShadow: '0 -10px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06)' 
     }}>
-      {/* Progress bar during injection */}
-      {injectState === 'injecting' && (
+      {/* Progress bar during injection or AI calibration */}
+      {(injectState === 'injecting' || injectState === 'calibrating') && (
         <div className="inject-progress" style={{ flexShrink: 0 }}>
           <div className="bar" />
         </div>
@@ -213,20 +215,28 @@ export function VRStatusBar({ status, selectedGame, injectState, onInject, onUni
                   ? 'rgba(204, 0, 0, 0.12)' 
                   : injectState === 'success' 
                     ? 'rgba(48, 209, 88, 0.25)' 
-                    : !selectedGame 
-                      ? '#1A1B22'
-                      : isDisconnected
-                        ? 'rgba(255, 159, 10, 0.12)'
-                        : 'linear-gradient(135deg, #FF1A1A 0%, #CC0000 55%, #990000 100%)', 
+                    : injectState === 'calibrating'
+                      ? 'linear-gradient(135deg, rgba(204, 0, 0, 0.35) 0%, rgba(120, 0, 0, 0.5) 100%)'
+                      : injectState === 'ready'
+                        ? 'linear-gradient(135deg, #FF1A1A 0%, #E60000 50%, #990000 100%)'
+                        : !selectedGame 
+                          ? '#1A1B22'
+                          : isDisconnected
+                            ? 'rgba(255, 159, 10, 0.12)'
+                            : 'linear-gradient(135deg, #FF1A1A 0%, #CC0000 55%, #990000 100%)', 
               border: isAntiCheat 
                 ? '1px solid #4A2020' 
                 : injectState === 'success' 
                   ? '1px solid var(--ag-accent-success)' 
-                  : !selectedGame 
-                    ? '1px solid #2C2D35' 
-                    : isDisconnected
-                      ? '1px solid #FF9F0A'
-                      : '1px solid #FF4D4D', 
+                  : injectState === 'calibrating'
+                    ? '1px solid rgba(255, 80, 80, 0.6)'
+                    : injectState === 'ready'
+                      ? '1px solid #FF5555'
+                      : !selectedGame 
+                        ? '1px solid #2C2D35' 
+                        : isDisconnected
+                          ? '1px solid #FF9F0A'
+                          : '1px solid #FF4D4D', 
               color: isAntiCheat 
                 ? 'var(--ag-accent-danger)' 
                 : !selectedGame 
@@ -243,12 +253,16 @@ export function VRStatusBar({ status, selectedGame, injectState, onInject, onUni
               fontSize: 14,
               letterSpacing: '0.12em',
               minWidth: 250,
-              boxShadow: (selectedGame && !isAntiCheat && injectState === 'default' && !isDisconnected) 
-                ? '0 0 24px rgba(204, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35)' 
-                : isDisconnected
-                  ? '0 0 16px rgba(255, 159, 10, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-                  : 'none',
-              textShadow: (selectedGame && !isAntiCheat && injectState === 'default' && !isDisconnected) 
+              boxShadow: injectState === 'ready'
+                ? '0 0 32px rgba(255, 20, 20, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.45)'
+                : injectState === 'calibrating'
+                  ? '0 0 16px rgba(204, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
+                  : (selectedGame && !isAntiCheat && injectState === 'default' && !isDisconnected) 
+                    ? '0 0 24px rgba(204, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35)' 
+                    : isDisconnected
+                      ? '0 0 16px rgba(255, 159, 10, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
+                      : 'none',
+              textShadow: (selectedGame && !isAntiCheat && (injectState === 'default' || injectState === 'ready') && !isDisconnected) 
                 ? '0 1px 3px rgba(0, 0, 0, 0.7)' 
                 : 'none',
               transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',

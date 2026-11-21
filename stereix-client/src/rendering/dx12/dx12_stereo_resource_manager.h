@@ -82,6 +82,15 @@ public:
         const DepthSnapshot& depth,
         bool shouldAttemptStereo);
 
+    // Target format negotiation (matches OpenXR swapchain)
+    void SetTargetFormat(DXGI_FORMAT format);
+    DXGI_FORMAT GetTargetFormat() const { return m_targetFormat; }
+
+    // Target dimensions negotiation (matches OpenXR swapchain)
+    void SetTargetDimensions(uint32_t width, uint32_t height);
+    uint32_t GetTargetWidth() const { return m_targetWidth; }
+    uint32_t GetTargetHeight() const { return m_targetHeight; }
+
     // Resources accessors
     ID3D12Resource* GetLeftEyeTexture() const { return m_leftEyeTexture.Get(); }
     ID3D12Resource* GetRightEyeTexture() const { return m_rightEyeTexture.Get(); }
@@ -103,6 +112,9 @@ private:
 
     uint32_t m_currentWidth = 0;
     uint32_t m_currentHeight = 0;
+    uint32_t m_targetWidth = 0;
+    uint32_t m_targetHeight = 0;
+    DXGI_FORMAT m_targetFormat = DXGI_FORMAT_UNKNOWN;
 
     // Rendering resources
     Microsoft::WRL::ComPtr<ID3D12Resource> m_leftEyeTexture;

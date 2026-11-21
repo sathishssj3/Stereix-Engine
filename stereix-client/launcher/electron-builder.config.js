@@ -13,6 +13,7 @@ module.exports = {
     'frontend-dist/**/*',
     'electron-dist/**/*',
     'assets/icon.ico',
+    'assets/taskbar_icon.ico',
     'package.json'
   ],
 

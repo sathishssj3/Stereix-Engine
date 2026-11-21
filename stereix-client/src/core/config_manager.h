@@ -43,9 +43,10 @@ struct VRConfig {
     float hudDistance = 1.8f;             // Virtual HUD distance in meters
     float hudCurvature = 0.35f;           // Cylinder curvature (0 = flat, 1 = half cylinder)
 
-    // P1.1: Cutscene Auto-Theater Mode
-    bool cutsceneTheater = true;          // Detect camera cuts and switch to cinema screen
-    float theaterDistance = 5.0f;          // Virtual cinema screen distance in meters
+    // P1.1: Cutscene Auto-Theater Mode & Virtual Cinema
+    bool cutsceneTheater = false;         // Disabled by default to prevent camera turns from boxing the game
+    bool forceCinemaMode = false;         // Force 2D virtual cinema mode always
+    float theaterDistance = 2.5f;          // Virtual cinema screen distance in meters
     float theaterCutThreshold = 120.0f;   // Degrees/sec rotational jerk threshold for cut detection
 
     // P1.2: Dynamic Comfort Vignette

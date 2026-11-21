@@ -24,6 +24,7 @@ ctest_output.txt
 *.pdb
 *.zip
 scratch_*.ps1
+install_build_tools.bat
 
 # ── Visual Studio ────────────────────────────────────────────
 .vs/
@@ -148,6 +149,13 @@ graphify-out/
 .codegraph/*.db-wal
 .codegraph/daemon.log
 
+# ── Presentation & Media Generator Artifacts ─────────────────
+brag-output*/
+extracted_shape*.png
+slide*.png
+output/
+data/
+
 # ── Keep these specific text files ───────────────────────────
 !docs/coupling_budget.txt
 !CONTRIBUTING.md
@@ -157,3 +165,5 @@ graphify-out/
 !THIRD_PARTY_LICENSES.md
 .wrangler/
 slavingia-skills/
+open_presentation.bat
+agent/

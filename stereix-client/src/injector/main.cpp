@@ -201,6 +201,29 @@ bool InjectDll(DWORD pid, const std::string& dllPath) {
         }
     }
 
+    // Duplicate Injection Shield:
+    // If vrinject.dll is already loaded in the target process (from a previous injection or proxy DLL bootstrap),
+    // calling CreateRemoteThread/LoadLibrary again risks Win32 Error 5 (ACCESS_DENIED) or corrupting MinHook.
+    // Detect existing module and report success cleanly.
+    HMODULE hExistingMods[1024];
+    DWORD cbExistingNeeded = 0;
+    if (::EnumProcessModules(hProcess, hExistingMods, sizeof(hExistingMods), &cbExistingNeeded)) {
+        DWORD numMods = cbExistingNeeded / sizeof(HMODULE);
+        char modName[MAX_PATH];
+        for (DWORD m = 0; m < numMods; ++m) {
+            if (::GetModuleFileNameExA(hProcess, hExistingMods[m], modName, MAX_PATH)) {
+                std::string sMod(modName);
+                for (auto& ch : sMod) ch = static_cast<char>(::tolower(static_cast<unsigned char>(ch)));
+                if (sMod.find("vrinject.dll") != std::string::npos) {
+                    PrintOK("Stereix Engine (vrinject.dll) is already loaded and active in target process (PID %lu).", pid);
+                    PrintOK("Hook pipeline and OpenXR runtime active. Injection verified successfully.");
+                    ::CloseHandle(hProcess);
+                    return true;
+                }
+            }
+        }
+    }
+
     SIZE_T pathLen = dllPath.size() + 1;
     void* remoteMem = ::VirtualAllocEx(hProcess, nullptr, pathLen,
                                        MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);

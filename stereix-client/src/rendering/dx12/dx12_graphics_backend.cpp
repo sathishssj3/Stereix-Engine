@@ -35,41 +35,51 @@ bool DX12GraphicsBackend::Initialize(void* nativeDevice, void* nativeContext) {
     std::lock_guard<std::mutex> lock(m_mutex);
     
     if (!nativeDevice) {
-        m_state = StereoRendererState::FAILED;
+        m_state = StereoRendererState::UNINITIALIZED;
         return false;
     }
 
     m_device = reinterpret_cast<ID3D12Device*>(nativeDevice);
     
-    // We get the command queue from the lifecycle manager
-    m_commandQueue = reinterpret_cast<ID3D12CommandQueue*>(Dx12LifecycleManager::Get().GetMainQueue());
+    // Acquire command queue from nativeContext or lifecycle manager
+    if (nativeContext) {
+        m_commandQueue = reinterpret_cast<ID3D12CommandQueue*>(nativeContext);
+    } else {
+        m_commandQueue = reinterpret_cast<ID3D12CommandQueue*>(Dx12LifecycleManager::Get().GetMainQueue());
+    }
     if (!m_commandQueue) {
-        std::cerr << "DX12GraphicsBackend: Failed to acquire CommandQueue from LifecycleManager!" << std::endl;
-        m_state = StereoRendererState::FAILED;
+        LOG_WARN("DX12GraphicsBackend: No CommandQueue available yet. Postponing initialization.");
+        m_state = StereoRendererState::UNINITIALIZED;
         return false;
     }
 
     if (!m_fenceManager->Initialize(m_device.Get())) {
+        LOG_ERROR("DX12GraphicsBackend: FenceManager initialization failed.");
         m_state = StereoRendererState::FAILED;
         return false;
     }
 
     if (!m_psoCache->Initialize(m_device.Get())) {
+        LOG_ERROR("DX12GraphicsBackend: PSOCache initialization failed.");
         m_state = StereoRendererState::FAILED;
         return false;
     }
 
     if (!m_resourceManager->Initialize(m_device.Get(), m_fenceManager.get(), m_psoCache.get())) {
+        LOG_ERROR("DX12GraphicsBackend: ResourceManager initialization failed.");
         m_state = StereoRendererState::FAILED;
         return false;
     }
 
     if (!m_renderer->Initialize(m_device.Get())) {
+        LOG_ERROR("DX12GraphicsBackend: StereoRenderer initialization failed.");
         m_state = StereoRendererState::FAILED;
         return false;
     }
 
     m_state = StereoRendererState::READY;
+    LOG_INFO("DX12GraphicsBackend: Initialization completed successfully (device=%p, queue=%p).",
+             m_device.Get(), m_commandQueue.Get());
     return true;
 }
 
@@ -98,7 +108,8 @@ StereoRendererState DX12GraphicsBackend::GetState() const {
 }
 
 bool DX12GraphicsBackend::Healthy() const {
-    return GetState() == StereoRendererState::READY;
+    StereoRendererState s = GetState();
+    return (s == StereoRendererState::READY || s == StereoRendererState::DEGRADED) && m_device != nullptr;
 }
 
 CameraSnapshot DX12GraphicsBackend::GetCamera() {
@@ -118,8 +129,14 @@ void DX12GraphicsBackend::RenderStereo(
     bool shouldAttemptStereo,
     void* uiMaskHandle) 
 {
-    if (m_state != StereoRendererState::READY) return;
-    if (!m_commandQueue) return;
+    if (m_state == StereoRendererState::UNINITIALIZED || m_state == StereoRendererState::FAILED) return;
+
+    // Dynamically synchronize active main queue from Dx12LifecycleManager across swapchains
+    ID3D12CommandQueue* activeQueue = Dx12LifecycleManager::Get().GetMainQueue();
+    if (activeQueue) {
+        m_commandQueue = activeQueue;
+    }
+    if (!m_commandQueue || !m_device) return;
 
     StereoConstants constants;
     constants.ipd = params.ipd;
@@ -230,16 +247,51 @@ void DX12GraphicsBackend::SubmitStereoFrame(
             currentSnapshot.rightPose = rightPose;
             currentSnapshot.rightFov = rightFov;
 
+            if (oxrSwapchain && m_resourceManager) {
+                if (oxrSwapchain->GetFormat() > 0) {
+                    m_resourceManager->SetTargetFormat(static_cast<DXGI_FORMAT>(oxrSwapchain->GetFormat()));
+                }
+                uint32_t oxrW = oxrSwapchain->GetWidth();
+                uint32_t oxrH = oxrSwapchain->GetHeight();
+                if (oxrW > 0 && oxrH > 0) {
+                    m_resourceManager->SetTargetDimensions(oxrW, oxrH);
+                }
+            }
+
             SetOpenXRSwapchainImages(leftDest, rightDest);
 
             RenderStereo(currentSnapshot, camSnapshot, depthSnapshot, params, shouldAttemptStereo, uiMaskHandle);
             bool stereoOk = (m_state == StereoRendererState::READY);
 
+            // Handle floating HUD quad submission if UI layer is detected
+            if (uiMaskHandle && oxrSwapchain && oxrSwapchain->GetHudSwapchain() != XR_NULL_HANDLE) {
+                uint32_t hudImageIndex = 0;
+                if (oxrSwapchain->AcquireHudImage(hudImageIndex)) {
+                    if (oxrSwapchain->WaitHudImage()) {
+                        oxrSwapchain->ReleaseHudImage();
+                        oxrSubmitter->SetHudQuad(oxrSwapchain->GetHudSwapchain(), currentSnapshot.width, currentSnapshot.height);
+                    }
+                }
+            } else {
+                oxrSubmitter->ClearHudQuad();
+            }
+
+            uint32_t submitW = (oxrSwapchain && oxrSwapchain->GetWidth() > 0) ? oxrSwapchain->GetWidth() : currentSnapshot.width;
+            uint32_t submitH = (oxrSwapchain && oxrSwapchain->GetHeight() > 0) ? oxrSwapchain->GetHeight() : currentSnapshot.height;
+
+            bool isCinema = false;
+            float cinemaDist = 2.5f;
+            const auto* cfgMgr = SubsystemContext::Get().GetConfig();
+            if (cfgMgr) {
+                const auto& cfg = cfgMgr->GetConfig();
+                if (cfg.forceCinemaMode) isCinema = true;
+                if (cfg.theaterDistance >= 1.0f) cinemaDist = cfg.theaterDistance;
+            }
+            oxrSubmitter->SetCinemaQuad(isCinema, cinemaDist, static_cast<float>(submitW), static_cast<float>(submitH));
+
             oxrSubmitter->ReleaseAndEndDX12(
                 xrRuntime->GetSession(), xrRuntime->GetReferenceSpace(),
-                oxrSwapchain, currentSnapshot.width,
-                currentSnapshot.height, currentSnapshot.width,
-                currentSnapshot.height);
+                oxrSwapchain, submitW, submitH, submitW, submitH);
 
             stateMonitor.UpdateStereoHealth(stereoOk || (currentSnapshot.backBuffer != nullptr));
             stateMonitor.UpdateOpenXrHealth(true);

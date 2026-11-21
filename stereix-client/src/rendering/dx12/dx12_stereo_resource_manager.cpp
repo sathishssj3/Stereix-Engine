@@ -50,6 +50,34 @@ void DX12StereoResourceManager::Shutdown() {
     m_cbvSrvUavHeap.Reset();
 }
 
+void DX12StereoResourceManager::SetTargetFormat(DXGI_FORMAT format) {
+    if (format == DXGI_FORMAT_UNKNOWN || m_targetFormat == format) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_targetFormat = format;
+    if (m_leftEyeTexture || m_rightEyeTexture) {
+        if (m_fenceManager) {
+            uint64_t fenceValue = m_fenceManager->GetLastSignaledValue();
+            if (m_leftEyeTexture) m_fenceManager->DeferRelease(m_leftEyeTexture, fenceValue);
+            if (m_rightEyeTexture) m_fenceManager->DeferRelease(m_rightEyeTexture, fenceValue);
+        }
+        m_leftEyeTexture.Reset();
+        m_rightEyeTexture.Reset();
+        if (m_currentWidth > 0 && m_currentHeight > 0) {
+            CreateEyeTextures(m_currentWidth, m_currentHeight);
+        }
+    }
+}
+
+void DX12StereoResourceManager::SetTargetDimensions(uint32_t width, uint32_t height) {
+    if (width == 0 || height == 0) return;
+    if (m_targetWidth == width && m_targetHeight == height) return;
+    m_targetWidth = width;
+    m_targetHeight = height;
+    HandleResize(width, height);
+}
+
 bool DX12StereoResourceManager::HandleResize(uint32_t width, uint32_t height) {
     if (width == 0 || height == 0) return false;
     if (width == m_currentWidth && height == m_currentHeight) return true;
@@ -70,10 +98,12 @@ bool DX12StereoResourceManager::HandleResize(uint32_t width, uint32_t height) {
 }
 
 bool DX12StereoResourceManager::CreateEyeTextures(uint32_t width, uint32_t height) {
+    if (!m_device || !m_cbvSrvUavHeap) return false;
+
     D3D12_HEAP_PROPERTIES heapProps = {};
     heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
     
-    DXGI_FORMAT eyeFmt = Dx12LifecycleManager::Get().GetFormat();
+    DXGI_FORMAT eyeFmt = (m_targetFormat != DXGI_FORMAT_UNKNOWN) ? m_targetFormat : Dx12LifecycleManager::Get().GetFormat();
     if (eyeFmt == DXGI_FORMAT_UNKNOWN) {
         eyeFmt = DXGI_FORMAT_R8G8B8A8_UNORM;
     }
@@ -110,7 +140,13 @@ bool DX12StereoResourceManager::CreateEyeTextures(uint32_t width, uint32_t heigh
     uavHandle.ptr += 3 * m_descriptorSize; // Skip CBV(1) + SRV(2)
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-    uavDesc.Format = desc.Format;
+    if (desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) {
+        uavDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    } else if (desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB) {
+        uavDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    } else {
+        uavDesc.Format = desc.Format;
+    }
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     
     m_device->CreateUnorderedAccessView(m_leftEyeTexture.Get(), nullptr, &uavDesc, uavHandle);
@@ -190,6 +226,32 @@ static Matrix4x4 InverseMatrix(const Matrix4x4& m) {
     return result;
 }
 
+static bool SafeGetResourceDesc(ID3D12Resource* res, D3D12_RESOURCE_DESC& outDesc) {
+    if (!res) return false;
+    __try {
+        outDesc = res->GetDesc();
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+static bool SafeCheckDepthReadable(ID3D12Resource* res) {
+    if (!res) return false;
+    D3D12_RESOURCE_DESC dDesc = {};
+    if (!SafeGetResourceDesc(res, dDesc)) return false;
+    bool denyShader = (dDesc.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE) != 0;
+    bool isTypelessOrFloat = (
+        dDesc.Format == DXGI_FORMAT_R32G8X24_TYPELESS ||
+        dDesc.Format == DXGI_FORMAT_R32_TYPELESS ||
+        dDesc.Format == DXGI_FORMAT_R24G8_TYPELESS ||
+        dDesc.Format == DXGI_FORMAT_R16_TYPELESS ||
+        dDesc.Format == DXGI_FORMAT_R32_FLOAT ||
+        dDesc.Format == DXGI_FORMAT_R16_UNORM
+    );
+    return (!denyShader && isTypelessOrFloat);
+}
+
 void DX12StereoResourceManager::UpdateFrameResources(
     ID3D12Device* device,
     const EyeView& leftEye,
@@ -198,17 +260,26 @@ void DX12StereoResourceManager::UpdateFrameResources(
     const DepthSnapshot& depth,
     bool shouldAttemptStereo) 
 {
+    if (!m_device || !m_cbvSrvUavHeap) return;
+
     // HandleResize has its own internal locking — call it before acquiring m_mutex
     // to avoid recursive lock deadlock
-    if (cam.IsValid() && cam.resourceIdentity.width > 0 && cam.resourceIdentity.height > 0) {
-        if (cam.resourceIdentity.width != m_currentWidth || cam.resourceIdentity.height != m_currentHeight) {
-            HandleResize(cam.resourceIdentity.width, cam.resourceIdentity.height);
+    uint32_t desiredWidth = m_targetWidth;
+    uint32_t desiredHeight = m_targetHeight;
+
+    if (desiredWidth == 0 || desiredHeight == 0) {
+        if (cam.IsValid() && cam.resourceIdentity.width > 0 && cam.resourceIdentity.height > 0) {
+            desiredWidth = cam.resourceIdentity.width;
+            desiredHeight = cam.resourceIdentity.height;
+        } else {
+            desiredWidth = Dx12LifecycleManager::Get().GetWidth();
+            desiredHeight = Dx12LifecycleManager::Get().GetHeight();
         }
-    } else {
-        UINT scWidth = Dx12LifecycleManager::Get().GetWidth();
-        UINT scHeight = Dx12LifecycleManager::Get().GetHeight();
-        if (scWidth > 0 && scHeight > 0 && (scWidth != m_currentWidth || scHeight != m_currentHeight)) {
-            HandleResize(scWidth, scHeight);
+    }
+
+    if (desiredWidth > 0 && desiredHeight > 0) {
+        if (desiredWidth != m_currentWidth || desiredHeight != m_currentHeight) {
+            HandleResize(desiredWidth, desiredHeight);
         }
     }
 
@@ -225,7 +296,12 @@ void DX12StereoResourceManager::UpdateFrameResources(
         consts.rightEyePos = rightEye.eyePosition;
         consts.width = m_currentWidth;
         consts.height = m_currentHeight;
-        consts.shouldAttemptStereo = shouldAttemptStereo ? 1 : 0;
+        
+        bool isDepthReadable = false;
+        if (depth.IsValid() && depth.identity.nativeHandle) {
+            isDepthReadable = SafeCheckDepthReadable(reinterpret_cast<ID3D12Resource*>(depth.identity.nativeHandle));
+        }
+        consts.shouldAttemptStereo = (shouldAttemptStereo && isDepthReadable) ? 1 : 0;
         const auto* cfg = SubsystemContext::Get().GetConfig();
         const auto& c = cfg ? cfg->GetConfig() : VRConfig{};
         consts.contrast = (c.contrast > 0.0f) ? c.contrast : 1.0f;
@@ -275,6 +351,8 @@ void DX12StereoResourceManager::UpdateFrameResources(
 }
 
 void DX12StereoResourceManager::UpdateViews(const CameraSnapshot& cam, const DepthSnapshot& depth) {
+    if (!m_device || !m_cbvSrvUavHeap) return;
+
     // Offset to SRV section
     D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart();
     srvHandle.ptr += m_descriptorSize; // Skip CBV
@@ -286,42 +364,67 @@ void DX12StereoResourceManager::UpdateViews(const CameraSnapshot& cam, const Dep
     DXGI_FORMAT colorFmt = DXGI_FORMAT_R8G8B8A8_UNORM;
 
     if (camRes) {
-        D3D12_RESOURCE_DESC resDesc = camRes->GetDesc();
-        colorFmt = (cam.IsValid() && cam.resourceIdentity.format != DXGI_FORMAT_UNKNOWN) ? 
-            static_cast<DXGI_FORMAT>(cam.resourceIdentity.format) : resDesc.Format;
-        if (colorFmt == DXGI_FORMAT_UNKNOWN) {
-            colorFmt = Dx12LifecycleManager::Get().GetFormat();
+        D3D12_RESOURCE_DESC resDesc = {};
+        bool camDescOk = false;
+        __try {
+            resDesc = camRes->GetDesc();
+            camDescOk = true;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            camDescOk = false;
         }
-        
-        switch (colorFmt) {
-            case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+
+        if (!camDescOk) {
+            camRes = Dx12LifecycleManager::Get().GetBackBuffer();
+            if (camRes) {
+                __try {
+                    resDesc = camRes->GetDesc();
+                    camDescOk = true;
+                } __except (EXCEPTION_EXECUTE_HANDLER) {
+                    camDescOk = false;
+                }
+            }
+        }
+
+        if (camDescOk) {
+            colorFmt = (cam.IsValid() && cam.resourceIdentity.format != DXGI_FORMAT_UNKNOWN) ? 
+                static_cast<DXGI_FORMAT>(cam.resourceIdentity.format) : resDesc.Format;
+            if (colorFmt == DXGI_FORMAT_UNKNOWN) {
+                colorFmt = Dx12LifecycleManager::Get().GetFormat();
+            }
+            
+            switch (colorFmt) {
+                case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+                    colorFmt = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    break;
+                case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+                    colorFmt = DXGI_FORMAT_B8G8R8A8_UNORM;
+                    break;
+                case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+                    colorFmt = DXGI_FORMAT_R10G10B10A2_UNORM;
+                    break;
+                case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+                    colorFmt = DXGI_FORMAT_R16G16B16A16_FLOAT;
+                    break;
+                case DXGI_FORMAT_R11G11B10_FLOAT:
+                    colorFmt = DXGI_FORMAT_R11G11B10_FLOAT;
+                    break;
+                default:
+                    break;
+            }
+            if (colorFmt == DXGI_FORMAT_UNKNOWN) {
                 colorFmt = DXGI_FORMAT_R8G8B8A8_UNORM;
-                break;
-            case DXGI_FORMAT_B8G8R8A8_TYPELESS:
-                colorFmt = DXGI_FORMAT_B8G8R8A8_UNORM;
-                break;
-            case DXGI_FORMAT_R10G10B10A2_TYPELESS:
-                colorFmt = DXGI_FORMAT_R10G10B10A2_UNORM;
-                break;
-            case DXGI_FORMAT_R16G16B16A16_TYPELESS:
-                colorFmt = DXGI_FORMAT_R16G16B16A16_FLOAT;
-                break;
-            case DXGI_FORMAT_R11G11B10_FLOAT:
-                colorFmt = DXGI_FORMAT_R11G11B10_FLOAT;
-                break;
-            default:
-                break;
+            }
+            
+            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+            srvDesc.Format = colorFmt;
+            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srvDesc.Texture2D.MipLevels = resDesc.MipLevels > 0 ? resDesc.MipLevels : 1;
+            __try {
+                m_device->CreateShaderResourceView(camRes, &srvDesc, srvHandle);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+            }
         }
-        if (colorFmt == DXGI_FORMAT_UNKNOWN) {
-            colorFmt = DXGI_FORMAT_R8G8B8A8_UNORM;
-        }
-        
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = colorFmt;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Texture2D.MipLevels = resDesc.MipLevels > 0 ? resDesc.MipLevels : 1;
-        m_device->CreateShaderResourceView(camRes, &srvDesc, srvHandle);
     }
     
     srvHandle.ptr += m_descriptorSize;
@@ -331,58 +434,105 @@ void DX12StereoResourceManager::UpdateViews(const CameraSnapshot& cam, const Dep
         camRes;
 
     if (depthRes) {
-        D3D12_RESOURCE_DESC resDesc = depthRes->GetDesc();
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Texture2D.MipLevels = resDesc.MipLevels > 0 ? resDesc.MipLevels : 1;
+        D3D12_RESOURCE_DESC resDesc = {};
+        bool depthDescOk = false;
+        __try {
+            resDesc = depthRes->GetDesc();
+            bool denyShader = (resDesc.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE) != 0;
+            bool isTypelessOrFloat = (
+                resDesc.Format == DXGI_FORMAT_R32G8X24_TYPELESS ||
+                resDesc.Format == DXGI_FORMAT_R32_TYPELESS ||
+                resDesc.Format == DXGI_FORMAT_R24G8_TYPELESS ||
+                resDesc.Format == DXGI_FORMAT_R16_TYPELESS ||
+                resDesc.Format == DXGI_FORMAT_R32_FLOAT ||
+                resDesc.Format == DXGI_FORMAT_R16_UNORM
+            );
+            depthDescOk = (!denyShader && isTypelessOrFloat);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            depthDescOk = false;
+        }
 
-        if (depthRes == camRes || !depth.IsValid()) {
-            // When no valid depth texture exists, use the valid color format for the fallback SRV
-            srvDesc.Format = (colorFmt != DXGI_FORMAT_UNKNOWN) ? colorFmt : resDesc.Format;
-            if (srvDesc.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS) srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-            else if (srvDesc.Format == DXGI_FORMAT_B8G8R8A8_TYPELESS) srvDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        } else {
-            DXGI_FORMAT actualFmt = (depth.identity.format != DXGI_FORMAT_UNKNOWN) ? 
-                static_cast<DXGI_FORMAT>(depth.identity.format) : resDesc.Format;
-            
-            switch (actualFmt) {
-                case DXGI_FORMAT_R32_TYPELESS:
-                case DXGI_FORMAT_D32_FLOAT:
-                case DXGI_FORMAT_R32_FLOAT:
-                    srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
-                    break;
-                case DXGI_FORMAT_R24G8_TYPELESS:
-                case DXGI_FORMAT_D24_UNORM_S8_UINT:
-                case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
-                case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
-                    srvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
-                    break;
-                case DXGI_FORMAT_R32G8X24_TYPELESS:
-                case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
-                case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
-                case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
-                    srvDesc.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
-                    break;
-                case DXGI_FORMAT_R16_TYPELESS:
-                case DXGI_FORMAT_D16_UNORM:
-                case DXGI_FORMAT_R16_UNORM:
-                    srvDesc.Format = DXGI_FORMAT_R16_UNORM;
-                    break;
-                default:
-                    if (resDesc.Format == DXGI_FORMAT_R24G8_TYPELESS || resDesc.Format == DXGI_FORMAT_D24_UNORM_S8_UINT) {
-                        srvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
-                    } else if (resDesc.Format == DXGI_FORMAT_R16_TYPELESS || resDesc.Format == DXGI_FORMAT_D16_UNORM) {
-                        srvDesc.Format = DXGI_FORMAT_R16_UNORM;
-                    } else if (resDesc.Format == DXGI_FORMAT_R32G8X24_TYPELESS || resDesc.Format == DXGI_FORMAT_D32_FLOAT_S8X24_UINT) {
-                        srvDesc.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
-                    } else {
-                        srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
-                    }
-                    break;
+        if (!depthDescOk) {
+            depthRes = camRes;
+            if (camRes) {
+                __try {
+                    resDesc = camRes->GetDesc();
+                    depthDescOk = true;
+                } __except (EXCEPTION_EXECUTE_HANDLER) {
+                    depthDescOk = false;
+                }
             }
         }
-        m_device->CreateShaderResourceView(depthRes, &srvDesc, srvHandle);
+
+        if (depthDescOk) {
+            D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srvDesc.Texture2D.MipLevels = resDesc.MipLevels > 0 ? resDesc.MipLevels : 1;
+
+            if (depthRes == camRes || !depth.IsValid()) {
+                // When no valid depth texture exists, use the valid color format for the fallback SRV
+                srvDesc.Format = (colorFmt != DXGI_FORMAT_UNKNOWN) ? colorFmt : resDesc.Format;
+                if (srvDesc.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS) srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                else if (srvDesc.Format == DXGI_FORMAT_B8G8R8A8_TYPELESS) srvDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+            } else {
+                DXGI_FORMAT actualFmt = (depth.identity.format != DXGI_FORMAT_UNKNOWN) ? 
+                    static_cast<DXGI_FORMAT>(depth.identity.format) : resDesc.Format;
+                
+                switch (actualFmt) {
+                    case DXGI_FORMAT_R32_TYPELESS:
+                    case DXGI_FORMAT_D32_FLOAT:
+                    case DXGI_FORMAT_R32_FLOAT:
+                        srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+                        break;
+                    case DXGI_FORMAT_R24G8_TYPELESS:
+                    case DXGI_FORMAT_D24_UNORM_S8_UINT:
+                    case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
+                    case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+                        srvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+                        break;
+                    case DXGI_FORMAT_R32G8X24_TYPELESS:
+                    case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+                    case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
+                    case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
+                        srvDesc.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+                        break;
+                    case DXGI_FORMAT_R16_TYPELESS:
+                    case DXGI_FORMAT_D16_UNORM:
+                    case DXGI_FORMAT_R16_UNORM:
+                        srvDesc.Format = DXGI_FORMAT_R16_UNORM;
+                        break;
+                    default:
+                        if (resDesc.Format == DXGI_FORMAT_R24G8_TYPELESS || resDesc.Format == DXGI_FORMAT_D24_UNORM_S8_UINT) {
+                            srvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+                        } else if (resDesc.Format == DXGI_FORMAT_R16_TYPELESS || resDesc.Format == DXGI_FORMAT_D16_UNORM) {
+                            srvDesc.Format = DXGI_FORMAT_R16_UNORM;
+                        } else if (resDesc.Format == DXGI_FORMAT_R32G8X24_TYPELESS || resDesc.Format == DXGI_FORMAT_D32_FLOAT_S8X24_UINT) {
+                            srvDesc.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+                        } else {
+                            srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+                        }
+                        break;
+                }
+            }
+            __try {
+                m_device->CreateShaderResourceView(depthRes, &srvDesc, srvHandle);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                // If depth SRV creation fails (e.g. non-typeless D32_FLOAT with DENY_SHADER_RESOURCE),
+                // fallback safely to camRes so the descriptor heap entry is always valid
+                if (camRes && depthRes != camRes) {
+                    D3D12_SHADER_RESOURCE_VIEW_DESC fallbackDesc = {};
+                    fallbackDesc.Format = colorFmt;
+                    fallbackDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                    fallbackDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                    fallbackDesc.Texture2D.MipLevels = 1;
+                    __try {
+                        m_device->CreateShaderResourceView(camRes, &fallbackDesc, srvHandle);
+                    } __except (EXCEPTION_EXECUTE_HANDLER) {
+                    }
+                }
+            }
+        }
     }
 }
 
