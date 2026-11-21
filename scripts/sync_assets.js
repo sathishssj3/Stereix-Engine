@@ -33,6 +33,32 @@ try {
 }
 console.log(`[+] Current Engine Version: v${currentVersion}`);
 
+function safeWriteFileSync(filePath, data) {
+  try {
+    fs.writeFileSync(filePath, data, 'utf-8');
+  } catch (err) {
+    const tmp = filePath + '.tmp.' + Date.now();
+    fs.writeFileSync(tmp, data, 'utf-8');
+    try { fs.unlinkSync(filePath); } catch {}
+    fs.renameSync(tmp, filePath);
+  }
+}
+
+function safeCopyFileSync(src, dst) {
+  try {
+    fs.copyFileSync(src, dst);
+  } catch (err) {
+    try {
+      const tmpDst = dst + '.tmp.' + Date.now();
+      fs.copyFileSync(src, tmpDst);
+      try { fs.unlinkSync(dst); } catch {}
+      fs.renameSync(tmpDst, dst);
+    } catch (e) {
+      console.warn(`[!] Non-fatal copy notice for ${path.basename(dst)}:`, e.message);
+    }
+  }
+}
+
 // 1.5 Synchronize native build binaries if present
 const binDir = path.join(rootDir, 'build', 'bin');
 const updatesDir = path.join(rootDir, 'updates');
@@ -44,16 +70,16 @@ if (fs.existsSync(binDir)) {
     const srcBin = path.join(binDir, binName);
     const dstBin = path.join(updatesDir, binName);
     if (fs.existsSync(srcBin)) {
-      fs.copyFileSync(srcBin, dstBin);
+      safeCopyFileSync(srcBin, dstBin);
       console.log(`[+] Synced binary ${binName} -> updates/${binName}`);
       if (fs.existsSync(path.dirname(docsUpdatesDir))) {
         if (!fs.existsSync(docsUpdatesDir)) fs.mkdirSync(docsUpdatesDir, { recursive: true });
-        fs.copyFileSync(srcBin, path.join(docsUpdatesDir, binName));
+        safeCopyFileSync(srcBin, path.join(docsUpdatesDir, binName));
         console.log(`[+] Synced binary ${binName} -> docs/updates/${binName}`);
       }
       if (appDataUpdatesDir) {
         if (!fs.existsSync(appDataUpdatesDir)) fs.mkdirSync(appDataUpdatesDir, { recursive: true });
-        fs.copyFileSync(srcBin, path.join(appDataUpdatesDir, binName));
+        safeCopyFileSync(srcBin, path.join(appDataUpdatesDir, binName));
         console.log(`[+] Synced binary ${binName} -> AppData/updates/${binName}`);
       }
     }
@@ -76,7 +102,7 @@ if (fs.existsSync(srcShadersDir)) {
     if (fs.existsSync(path.dirname(destDir))) {
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       for (const sf of shaderFiles) {
-        fs.copyFileSync(path.join(srcShadersDir, sf), path.join(destDir, sf));
+        safeCopyFileSync(path.join(srcShadersDir, sf), path.join(destDir, sf));
       }
       console.log(`[+] Synced ${shaderFiles.length} shaders -> ${path.relative(rootDir, destDir)}`);
     }
@@ -103,7 +129,7 @@ if (fs.existsSync(srcProfilesDir)) {
     if (fs.existsSync(path.dirname(destDir))) {
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       for (const pf of profileFiles) {
-        fs.copyFileSync(path.join(srcProfilesDir, pf), path.join(destDir, pf));
+        safeCopyFileSync(path.join(srcProfilesDir, pf), path.join(destDir, pf));
       }
       console.log(`[+] Synced ${profileFiles.length} profiles -> ${path.relative(rootDir, destDir)}`);
     }
@@ -174,16 +200,16 @@ if (fs.existsSync(manifestFile)) {
     }
 
     const jsonStr = JSON.stringify(manifest, null, 2);
-    fs.writeFileSync(manifestFile, jsonStr, 'utf-8');
+    safeWriteFileSync(manifestFile, jsonStr);
     console.log(`[+] Recomputed hashes and updated: ${path.relative(rootDir, manifestFile)}`);
 
     if (fs.existsSync(path.dirname(docsManifestFile))) {
-      fs.writeFileSync(docsManifestFile, jsonStr, 'utf-8');
+      safeWriteFileSync(docsManifestFile, jsonStr);
       console.log(`[+] Synced manifest -> ${path.relative(rootDir, docsManifestFile)}`);
     }
     if (appDataUpdatesDir) {
       if (!fs.existsSync(appDataUpdatesDir)) fs.mkdirSync(appDataUpdatesDir, { recursive: true });
-      fs.writeFileSync(path.join(appDataUpdatesDir, 'manifest.json'), jsonStr, 'utf-8');
+      safeWriteFileSync(path.join(appDataUpdatesDir, 'manifest.json'), jsonStr);
       console.log(`[+] Synced manifest -> AppData/updates/manifest.json`);
     }
   } catch (e) {

@@ -1,1133 +1,1139 @@
 {
-  "version": 1,
+  "version": 2,
   "skills": {
     "accessibility-auditor": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/accessibility-auditor/SKILL.md",
-      "computedHash": "815af2469f0fdb1f04e6ca017b777e52aff94a6e97aa284184bc429c18d5e026"
+      "computedHash": "60acd352e3536af772e55080fc68e9e42baa374b75aed3ec77ec561842f6475b"
     },
     "adr-writer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "architecture/adr-writer/SKILL.md",
-      "computedHash": "2268d420cfad78ad0c914ee57f4ea3fad8d0edc2e10cbb7b35a825ae2a0885a0"
+      "computedHash": "9a66b77a442341aa4910f6d0522b0b6277e265854f36360b3aff880668b93f4a"
     },
     "agent-orchestration-planner": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/agent-orchestration-planner/SKILL.md",
-      "computedHash": "869b83990f3340929cbcb4d8fc7c3e05708128058aaf2ec72b2448286861be36"
+      "computedHash": "488f6d1d2f059dbf669061724e3c1cd4149e3256cc2ef46b720a40e3435f02ef"
     },
     "ai-agent-orchestrator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/ai-agent-orchestrator/SKILL.md",
-      "computedHash": "72b88e41da2d2fc4ecbb50546ba14be33bd300d3dd05b9868a26ad8b7ed88979"
+      "computedHash": "fa6f458fdd4bbf86d3c3269f2c89ec7f2afd79eab53f1a274b65d11145408951"
     },
     "alerting-dashboard-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "performance/alerting-dashboard-builder/SKILL.md",
-      "computedHash": "5b5e24307e3df47a12e7fb9a4457878dc5ab63a47be71af697aa5a9a7a35525a"
+      "computedHash": "a367fd8edfb348d05bcd8e01e6a42a40887e1e59e6f81e389c88e85b8eb8267d"
     },
     "animate": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/animate/SKILL.md",
-      "computedHash": "fb0a18403891238d4ce4fc80f891689678766c29092de1e3aadc0c917133ee5d"
+      "computedHash": "588a8f7b37c3f37762ad10a552a74b6d6b608c720ea00d9dd798e0d50416100a"
     },
     "animate-expo": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/animate-expo/SKILL.md",
-      "computedHash": "3e914b8abdff154a289dcabc63817b6b5d649272a0d054e7e799f37e4bb1c471"
+      "computedHash": "3cbc0a9466a1404de98bec73eb6789257556e632f82c58319308a64ff42a5771"
     },
     "animation-micro-interaction-pack": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/animation-micro-interaction-pack/SKILL.md",
-      "computedHash": "6710c76c1eddba8f57f98957780a57eb1a5a0b027395b0e8f0eac9dba87e22c1"
+      "computedHash": "9b14a7defdbab2958626da0fe0d52aafd5824bf32989c41f3af1c8dadd3dae68"
     },
     "animation-vocabulary": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/animation-vocabulary/SKILL.md",
-      "computedHash": "9aaad861dd54dab7c9bb3fb5bd4c539078d8d06c14530d92d49cdb1509bfa937"
+      "computedHash": "1c50a737b755ff021f5216c7b89af3734ba0f9a908d0b540d3e9979f52fef3e2"
     },
     "api-contract-normalizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/api-endpoint-generator/SKILL.md",
-      "computedHash": "062c14676daf93f2318e377507f6387e2a6467b80e2d16367b6e085d3e3401ef"
+      "computedHash": "3e4e15a1ae87615474f927008cbbf3307d69327912a8e997f08c0e3589c147cf"
     },
     "api-docs-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/api-docs-generator/SKILL.md",
-      "computedHash": "38131740c309bbcd98e1b3e5e600aff0883d81e2c44efc0956db78e31dc98762"
+      "computedHash": "646c2884eed9ff1b6d899819864c6adc2157481e51391a7b59e86df5c3441ed6"
     },
     "api-endpoint-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/api-contract-normalizer/SKILL.md",
-      "computedHash": "e22a57438f165f87636ec2a37390a1f8ce9b0e38510f57379f94e2e3b1c20109"
+      "computedHash": "8ab0a2b8a4670c236a321b0e22a137d9f47500ff31a3eea635ff28c464ba52fd"
     },
     "api-mock-server": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/api-mock-server/SKILL.md",
-      "computedHash": "4cb956b53ca40c331eb2c579e01a6edd318df77c2c7ec3b9a34681de35476155"
+      "computedHash": "b6d6c2d5bb58b04d7f1c3673323b162cc9eda200774deac76b9a3ddb9d7e0fe4"
     },
     "api-security-hardener": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/api-security-hardener/SKILL.md",
-      "computedHash": "c9a48e8831bfbae42aa06973588ad7781e8e59d9775854017606f3d0b459f4ba"
+      "computedHash": "2589e3afaf599228a1116f44b5223526eed0daf7639be251b3a923ed3a289890"
     },
     "api-test-suite-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/api-test-suite-generator/SKILL.md",
-      "computedHash": "53a1cb92e5624a219b7aea9277c82f4de9f4059764282b6681983e711114cb3e"
+      "computedHash": "4e331076cd07461a749ffa8e2f4e409606a1e1918a5f789c889387fc75d01492"
     },
     "api-versioning-deprecation-planner": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "architecture/api-versioning-deprecation-planner/SKILL.md",
-      "computedHash": "ea5836081206f5673d7e5ec747477f878715762dbd86cf19b0b732041334776e"
+      "computedHash": "997ea39f24da5128e479b608ab3dbfb690232916e409179957b723da42bfc1d0"
     },
     "apple-design": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/apple-design/SKILL.md",
-      "computedHash": "f3f1d2cbc8f3e79ccddff05f4e42d34d995f057fb30ff670e4edf8c87d568b69"
+      "computedHash": "118d450c2d6ca54fee5f56cf8883fa3231bc2d917bb8f5a3f87488162c55fac9"
     },
     "artifact-sbom-publisher": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/artifact-sbom-publisher/SKILL.md",
-      "computedHash": "893b609d4ae627e30563f17e7973bdd9456504959bfeddbc366224ed69030a7d"
+      "computedHash": "6b43d41b109f6061fe0107f38ee629ad23e78c0b5332ce29ec181df58ad4df21"
     },
     "ask-sonner": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/ask-sonner/SKILL.md",
-      "computedHash": "0168a6a129ba0a3561ccbda3a3d8d0dc0af1d556f373e315e9479e3364420dd3"
+      "computedHash": "3d53f948bd8b19993b70d66929f70fa5ddb44bca6018e2c29f9cec6c8bf2b9cf"
     },
     "auth-module-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/auth-module-builder/SKILL.md",
-      "computedHash": "1b5f99990683ede55650ed1808cad2b04e39c8263b21b823fbed7f56862f7b15"
+      "computedHash": "82d1b9ccb9aa20547e3f5804e6c9820e1f24bbe269011fcb0a3510aa6fb0c1b5"
     },
     "auth-security-reviewer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/auth-security-reviewer/SKILL.md",
-      "computedHash": "94522386981de33b55e318b6e2ebc546e538e667d3f8381b277717995ce0502e"
+      "computedHash": "2a9848fcb35bcc0935462097b4c0d0be7c0a8aae46f1fb196d8020c71466d7f0"
     },
     "backend-latency-profiler-helper": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "performance/backend-latency-profiler-helper/SKILL.md",
-      "computedHash": "4cda03531190c65fec6020c6f199a3a0880f0f0b2a08b17b2863cd01625d5cb6"
+      "computedHash": "604c9433dc744e84ea6bdfbed131c313dd71f6d98282f1bd236a49ad1c856bdc"
     },
     "background-jobs-designer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/background-jobs-designer/SKILL.md",
-      "computedHash": "e3c37547cb410d5dd91bae51f4d837ce6f8a145cb5b53b65a8bcec72d1751b18"
+      "computedHash": "1c418649b99f0c7842b9ae7ccf0dd942bf9e4592c8b3fea8416d19aaee875d7d"
     },
     "backup-restore-runbook-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "db-management/backup-restore-runbook-generator/SKILL.md",
-      "computedHash": "ced00ca8f78d5ab157f4b95dbf947f4e7b35f4dbee9315d176b3d13a6b5682d2"
+      "computedHash": "af4c7ace89c47830d129277172543dfa70a451cb54de294f559f05168df1501c"
     },
     "banner-design": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
       "skillPath": ".claude/skills/banner-design/SKILL.md",
-      "computedHash": "0645bfc33632c7b332e649e35738ea807e1571436289cdaf86bebe6660c693ec"
+      "computedHash": "4b22f6f48afc6fcd72e6f3ae106a4dca11b33b88221efded1f5c62d8f9afb50d"
     },
     "brag-slim": {
       "source": "latent-spaces/brag",
       "sourceType": "github",
       "skillPath": "skills/brag-slim/SKILL.md",
-      "computedHash": "bb21b91d59e00081d80b379e06fdb38526a6eadd70dec6c1c74c4f644edd7b19"
+      "computedHash": "5ebbe89632acc969f51b1d8be6115975e5bcf496ef037b59b5326c39c4f55d5b"
     },
     "brand": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
       "skillPath": ".claude/skills/brand/SKILL.md",
-      "computedHash": "9119809f6d86cb42bb254754ac8718d9f948551cfd45988131fa8cd8eb688e73"
+      "computedHash": "09bbdcf0bda27504561dae922ab0b17e614cfe14ea222b5aa4e90c1ef2b69652"
     },
     "brandkit": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/brandkit/SKILL.md",
-      "computedHash": "735007879f5110aeae1e981a53fe74a12afde70347f9773dacd50e4697a091bf"
+      "computedHash": "c89a5763a53a705a6fb3a3af83796b10d2aa05faf7b8b8fe1db0589c454ba80e"
     },
     "bruno-collection-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/bruno-collection-generator/SKILL.md",
-      "computedHash": "e4d218e643de7115e037fb18f61c5a6a4f7433179aa223f06921a011ee4740e8"
+      "computedHash": "9982dcc11327cc8582f95a97b9421d6b7dbe1c23e2ae150f9c44b0cfb96ba62e"
     },
     "caching-cdn-strategy-planner": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "performance/caching-cdn-strategy-planner/SKILL.md",
-      "computedHash": "8568448efc455fd73e5b7969634ea6ae2aa7fa00eba6ca54476e8d8acffacac8"
+      "computedHash": "2214d1e23e57145713d5008a8b1e876bc4e42f530b03d250f2a4ecb9d6591fa0"
     },
     "caching-strategist": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/caching-strategist/SKILL.md",
-      "computedHash": "a3f7c92779f4519fed7d38e189b1140df354d97fd0d78d43c4645935c17ce11b"
+      "computedHash": "fa8be840600e7be1e5b170af00ce539ccf7430a38bcbb9af90596f25fea0a030"
     },
     "caching-strategy-optimizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/caching-strategy-optimizer/SKILL.md",
-      "computedHash": "1413b57855ccbb4b625af38ed83ffc7b0306ba62d47aac166e20b1d86ead53b0"
+      "computedHash": "b26086972133d1bace57de1aab549f6974029bf36bf0636d8bce00b9029b7720"
     },
     "capacity-planning-helper": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "performance/capacity-planning-helper/SKILL.md",
-      "computedHash": "c60c41f8d6fea68041a75b0836637eca4139c65ac4d4c2306565e34edad92e26"
+      "computedHash": "8789b2630315c2ec12b1815eaab266d6b95f2124fee03f3b9afc31d8ac96a4b2"
     },
     "changelog-writer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/changelog-writer/SKILL.md",
-      "computedHash": "9837999ebe59313ef15835e2426614b13a67d50e24a38e971d464bbf1b92c07b"
+      "computedHash": "1aebedd3eba6e05fc75289436bc6246144c660bed51fc4473a770c2f9f8db11d"
     },
     "code-formatter-installer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/code-formatter-installer/SKILL.md",
-      "computedHash": "e0ef02c383c1844ba0432f96937f27be6da89515df5b05496f4c81e79027bfe4"
+      "computedHash": "f382ba6b11dca79b614990280688c9959dd280895ee9d5d34e9606d2ac3459b7"
     },
     "codebase-summarizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/codebase-summarizer/SKILL.md",
-      "computedHash": "8e04c027f7309070b00d085717daa16d95d5019df291b978d2b8dcd6f49de716"
+      "computedHash": "eb9d27f1a505443e9910711402548e77d6fbf6131adbf766b6e8e23a6d4267a9"
     },
     "component-scaffold-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/component-scaffold-generator/SKILL.md",
-      "computedHash": "46a4100e170853265ce24462d8bba550fc3a7f96c191df064d9a9d0eefde9886"
+      "computedHash": "ee6290c0af0139a20d1ea8e450d983bb6e8df23463b1f18bb8aea5ef08774202"
     },
     "contract-testing-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/contract-testing-builder/SKILL.md",
-      "computedHash": "a1d65574a3db52c85b40c1e44b7f7454bf4d461e2cefc028a0ab179b9b1845bf"
+      "computedHash": "509e1d435d91cb37ac3c95390fa21222962d15c941e8edc7587faaddc913bf8a"
     },
     "conventional-commits": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/conventional-commits/SKILL.md",
-      "computedHash": "7ef6d7db4fa5ce56b05b754779cfe755a50d14f0b4ae93f2b62c6ddb10045faa"
+      "computedHash": "9ee955406ca87842850f0e920c07e760afc9b6064ed0dd46072ab8649fe9d048"
     },
     "core-web-vitals-tuner": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "performance/core-web-vitals-tuner/SKILL.md",
-      "computedHash": "5ad5e6845a00484137b5134eb0f2f0ea5bd5ba289942c79241efbf5d63c3fc0d"
+      "computedHash": "e20fc3d0399b115b90cd25d7f4547c0c7a5a82cc6aa63c5ca481826802b551d2"
     },
     "cors-configuration": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/cors-configuration/SKILL.md",
-      "computedHash": "f58589658b978f6fdb5e9bb46f3925469952b9e54b075db81ebd773fd697a72f"
+      "computedHash": "9c90e2ace0cb1c45f4a57ec2d041cd7cc13563e75d2b3744fb38bb5a99474961"
     },
     "cost-latency-optimizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/cost-latency-optimizer/SKILL.md",
-      "computedHash": "99272998c75f04f7de3b3be21bb56bba278dd980ffd4d9733c41db54565208df"
+      "computedHash": "dfa71582f4f7e6ad27ebf362bca7446dee362e0cfcd2039c9d60d4b9298f8f46"
     },
     "coverage-strategist": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/coverage-strategist/SKILL.md",
-      "computedHash": "166c333439053926233b5182f5ee5ae9eeebcf34b090fb2bf703ed24bd2a8bf3"
+      "computedHash": "d83df2aa2dedb3f16e22c68e3ba51dfd43ebdfbf7588ae6c01a74cedf29f87e8"
     },
     "curl-command-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/curl-command-generator/SKILL.md",
-      "computedHash": "e1efa87ca72d79b76e1cae7fe3435ac9095258aa430db1af67dec317d23b50be"
+      "computedHash": "273084c960f806670ab4762f9e4703575ef1e1b83061f2778dcb55ebd449511e"
     },
     "cypress-playwright-setup": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/cypress-playwright-setup/SKILL.md",
-      "computedHash": "8e354fdacc8c2e91dde8c4df5e711988984640113106d95dbe315ef4305366e5"
+      "computedHash": "3ff8fe0fbd81d1d67a7f052f3709cc0c838f81ebcd9ea6baa86c6d7741a53b47"
     },
     "dark-mode-implementer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/dark-mode-implementer/SKILL.md",
-      "computedHash": "126d5d919933ff8703e7070e5bda13345ca028f5677996f2d32bc620d1c6f0cf"
+      "computedHash": "3149f66f5cc0f829fc38ae9939cf3bb3aeb71308228c142cd8e17610aea0eea7"
     },
     "data-integrity-auditor": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "db-management/data-integrity-auditor/SKILL.md",
-      "computedHash": "173fe0aac0f02e3c1a9748b9edfc0df8ecf4cb553cbdd65bdfa7a21b990a6384"
+      "computedHash": "fe6827de261831dafdf98519d7c5df107ce1ec869461cec00ece4819650330ec"
     },
     "data-retention-archiving-planner": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "db-management/data-retention-archiving-planner/SKILL.md",
-      "computedHash": "a90a81ef5c7222d36cd1bb2f5ef99d0eec2ad921bc9fe96fe9eb2581659c7aef"
+      "computedHash": "1ac9c98e503fc4e6fe19abaa988036f822b534d6c309b8791384710a5b5e63cf"
     },
     "data-seeding-fixtures-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "db-management/data-seeding-fixtures-builder/SKILL.md",
-      "computedHash": "5f6b659e9562802706779ab22e30c6a8e31684d04d8cba24d8564a8685074cde"
+      "computedHash": "896ae7e89bfc9d17d95142ca638d74db2b713859ed22e05b4507227428c4670d"
     },
     "db-performance-watchlist": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "db-management/db-performance-watchlist/SKILL.md",
-      "computedHash": "f6b444ba3b913c5e354e1f9dff8d8d53e4ef08962223ab06c9fa2630bad95927"
+      "computedHash": "a52aa41f6669d0cf39b1bfccea3a12078b32a9668a80143e3e17e43e8e87cf4e"
     },
     "dependency-doctor": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/dependency-doctor/SKILL.md",
-      "computedHash": "ebc1e0d139cc1d7e1fc15fb9a4e9757726f94b2daaf385fb47006ee80943ba76"
+      "computedHash": "4e4eb617c4dbe0f111bf4b7db440db26f4271a5647d21ec4a861c9f21ba7964e"
     },
     "dependency-vulnerability-triage": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/dependency-vulnerability-triage/SKILL.md",
-      "computedHash": "97702e3ba99d1b1769f64cf4319996c78f49b2765375b19e4dc7a44f64a117f2"
+      "computedHash": "79ab6ca2ca6ed19b9dee3c5d4b8140699ee4887661ba826b60b13d850989c12d"
     },
     "deployment-checklist-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/deployment-checklist-generator/SKILL.md",
-      "computedHash": "61d7f805cc91c7d52e36223fb920c8c441f31ac45c8b275b22563ba334ff3cbe"
+      "computedHash": "da04444de05d206950065b0ccbffc1fbe2265a758c69fe9e014321f789ff978e"
     },
     "design": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
       "skillPath": ".claude/skills/design/SKILL.md",
-      "computedHash": "913d28d0e24925677a3b0de73cfaaa8bda3cc7fc502744bf14aaa5b91492be0d"
+      "computedHash": "e3d9e985f84d4f8f5cd04f7a9c24f6651b15ab2bd43a6ab465a372e946f2fd94"
     },
     "design-system": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
       "skillPath": ".claude/skills/design-system/SKILL.md",
-      "computedHash": "a8d1f1cd0f55979a872a2ce9717d3c33df23b0c378738b8d6adb574bfb266c77"
+      "computedHash": "f711176c54dedef1dd16865a54882cb635b7b9f6b03c7aa15440d7096bc0ac4e"
     },
     "design-taste-frontend": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/taste-skill/SKILL.md",
-      "computedHash": "899b84384f74f540ea5284d9b2e9234e050998b42eacc805410b518d4226c0b3"
+      "computedHash": "44f5bbbf437a1d5d08f2540a3db55c2e930395cbdc029276819e942dc158217b"
     },
     "design-taste-frontend-v1": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/taste-skill-v1/SKILL.md",
-      "computedHash": "0a226c13d69639553cf8a7c40aa5527b026820f8ddaf7a6b263988e32ab44a27"
+      "computedHash": "ee02c3e557cee17595d2e896de2e4e4e142dbc7c20fb7628534e352331634a0c"
     },
     "design-to-component-translator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/design-to-component-translator/SKILL.md",
-      "computedHash": "83a0e825aae77aba084522648a5e32a3a6e92383d6253ade7bce136131169f49"
+      "computedHash": "4cb90ed8fe6d502a62f83d02e54856260d497ac38d596ae8ce45b5bc8bf5f807"
     },
     "dev-environment-bootstrapper": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/dev-environment-bootstrapper/SKILL.md",
-      "computedHash": "ac5f0c3d36c3fa6ed0a2ef93453d03ed0ef3ae1cbbaa8045dd361200b9250e76"
+      "computedHash": "1d496f1f50b0b5ece569d9419cf78945056d28bb32ce020d95177e2e99be967d"
     },
     "dev-onboarding-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/dev-onboarding-builder/SKILL.md",
-      "computedHash": "46334bcd139cc0b5f4fdfd8d5899e3e7d4e0bdc7223f267ef78e6243990a5858"
+      "computedHash": "536627f758c27fe5b83cc92fcaf23f62c8fe09ca14ae2924020446e0bb3fb89e"
     },
     "doc-to-vector-dataset-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/doc-to-vector-dataset-generator/SKILL.md",
-      "computedHash": "6f192b6017b27bdb334724f8028e39b6eeef76815edba6eb0b66b96b346df761"
+      "computedHash": "e8c799f9cc41b7e384ac7c5e1339f63d3fb5f4ee97a026a53ea2274bec69ddfe"
     },
     "dockerfile-optimizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/dockerfile-optimizer/SKILL.md",
-      "computedHash": "e008d1b146276bed031728642839e0be477c9cb9bfdec3827423f0cea9109a80"
+      "computedHash": "9907f0fccc9b75c35ec1e7897910eec4a035f441a1734544093750e37a580b33"
     },
     "docs-starter-kit": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/docs-starter-kit/SKILL.md",
-      "computedHash": "ba1ef0b180873f2aa803b08d8397e391f363cc19fe2fd3f3a0e1db8c0a8d0b73"
+      "computedHash": "d19d84566b6fd4554952b3f8633318f1c9ff19f9b4383a667e7e6eb5383d56fe"
     },
     "domain-model-boundaries-mapper": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "architecture/domain-model-boundaries-mapper/SKILL.md",
-      "computedHash": "5003263556b82030a4cdd7b89239dca8ffa31c2894e3d29a048a0ccb4ce89059"
+      "computedHash": "981e5258f35054410720b03315f4dab9e1994931393583dc80559d326160ca2e"
     },
     "e2e-test-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/e2e-test-builder/SKILL.md",
-      "computedHash": "fc8d36a3bcd3b107bbdefcedba7d68d4127c28bc3f9b4228b5ff4cd11b0556e2"
+      "computedHash": "46d0a9d5f88a47ae9eb6b36287fce3f99078ec6884e9631dcf5f866cad938091"
     },
     "embedding-pipeline-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/embedding-pipeline-builder/SKILL.md",
-      "computedHash": "efb997c3212cf21b18adeda9028cdb3f30c1a7e63de3fa7ecef8719f9c75fde0"
+      "computedHash": "50e05775638f46f9784f7fee5f80075058420e63e2b2b7bc2b386b9b283d422f"
     },
     "emil-design-eng": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/emil-design-eng/SKILL.md",
-      "computedHash": "77853cec799207f80868c611374c6ed5fdf34a55355c5ab544b59e791c63ad98"
+      "computedHash": "8c563f971b37710a80a95b88d5f2ea6758b3ec4b66ec15f5bb41850830e8f5ed"
     },
     "env-secrets-manager": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/env-secrets-manager/SKILL.md",
-      "computedHash": "d856bf3de3c762b6d0636979ed5b14b252690d6993498086f43b3d95d382ad88"
+      "computedHash": "768c6d4d3b12e252bbedc393c7787aa4ac503c0ee749b5cf7a17f067508f6485"
     },
     "error-handling-standardizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/error-handling-standardizer/SKILL.md",
-      "computedHash": "8ae983501beb379da6462dd4bf11f6d2d20fd5fa6eef1dd42a21c19e60ecc2f8"
+      "computedHash": "d5accc65adc23f4622aed708889e93459f9e51251facc4f02c79ebb1d9938c4f"
     },
     "eslint-prettier-config": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/eslint-prettier-config/SKILL.md",
-      "computedHash": "ee512310dea918a546572bf6ea7e8d822d201ae0cdb4bada288772ff984ddb00"
+      "computedHash": "325500705dbec60e8352b1ceb64347c4674414acfb63c35bc731d37e67f62fe8"
     },
     "etl-sync-job-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "db-management/etl-sync-job-builder/SKILL.md",
-      "computedHash": "696cde1e5fe1138e6c12ff94731f3e2e95c2f5f7f2a36e3cd9f9f77c04db37a3"
+      "computedHash": "27d8a792ace0b97115b5ff4da6d86378cbf319c0a9da51503775685fd73022c7"
     },
     "evaluation-harness": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/evaluation-harness/SKILL.md",
-      "computedHash": "4a074681dd1a41cd92ab2c75eb0558d3033bccfbf23eaa82b5b8373325884bd1"
+      "computedHash": "1c743b489343c3c3fa25ddcb8d0a1483300da795ab244ab0f4ba30861db7cf6c"
     },
     "event-driven-architect": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/event-driven-architect/SKILL.md",
-      "computedHash": "93f5ff4ae967cc7641d68fd0cb7d4e07438cb33b7d4b14179ba059449eda457f"
+      "computedHash": "d1d73d87e174873634034af42d1eed84877de8f3e6ae1da784283d7162cf5a69"
     },
     "explaining-code": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/explaining-code/SKILL.md",
-      "computedHash": "5ad02ec870883f795064ec520c3fa628599ec16241c1539001075b39f4d322b7"
+      "computedHash": "1a700617fa0293317a2df2fafddeef4c2d6405d571c70fa3a07ab60674dc45dc"
     },
     "find-animation-opportunities": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/find-animation-opportunities/SKILL.md",
-      "computedHash": "c6673fadf179233cc0a52c978ea9acc9b82a210665c749307a571a86ed4c092e"
+      "computedHash": "6912a27a684feba9dd220349940d8a44e0d7b720cab71042f268a7ed93bf4bab"
     },
     "flaky-test-detective": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/flaky-test-detective/SKILL.md",
-      "computedHash": "4c22ba1e0949b6bc7a77657e0585058f34f26a396d08b21b07e07447bb46ff23"
+      "computedHash": "f6f3d642957a826deecc5abd45c3b9593b0efba9bd1e95973e4ea13d997e8d8c"
     },
     "form-wizard-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/form-wizard-builder/SKILL.md",
-      "computedHash": "b4b762e6458e1ab607ebdd610a704cbcca6dce13dbe7ce1030d50585532c33af"
+      "computedHash": "8b886d9955c8226c3a46682104fc4d6b4ed7aa133f7405bdb681cff2d23e0d19"
     },
     "framer-motion-animator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/framer-motion-animator/SKILL.md",
-      "computedHash": "22a8401fab0cdf32d5c153b98aba5e95435a479810896879535dc7ac3710efbe"
+      "computedHash": "2f47c7af86096e9fe96c15d4e9e0b5e3462dcd549796402366e62343e4884c32"
     },
     "frontend-refactor-planner": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/frontend-refactor-planner/SKILL.md",
-      "computedHash": "bd5390955b50bf9d369aca332ad8e02eb37281a2f5411802a5a333bfd710b34e"
+      "computedHash": "007910842cfe38e25b24611ec2677e48e824850f43268fae517cf39edcd52b7e"
     },
     "full-output-enforcement": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/output-skill/SKILL.md",
-      "computedHash": "524f7c7950c3fde726101613f630140411c7d080e63be718687f4b38f919be81"
+      "computedHash": "9f39bf2e92322e91e2446f709b44537aaee222949dd5860c56eccb50d66331b3"
     },
     "git-hygiene-enforcer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/git-hygiene-enforcer/SKILL.md",
-      "computedHash": "022f95be831ea7635bf2c435193f6d534bf8ebf1ce90a47bee0d8f266f824607"
+      "computedHash": "a821d4205af59a1289898764eab6a1f48d98528eb439e6c199b05c5c3b2dc9e4"
     },
     "github-actions-pipeline-creator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/github-actions-pipeline-creator/SKILL.md",
-      "computedHash": "c359766d9644d1a2cc8fa80019643fac6b87c5740e6a14e8c4e99d490ed2b97e"
+      "computedHash": "d5620ee5687a105490b037f0d9f5bb8b207cab0d2aab85cfc6c797bffd9adcda"
     },
     "gpt-taste": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/gpt-tasteskill/SKILL.md",
-      "computedHash": "7bd1bfdda0e51016ca222693401a65fc0dd9bf9487e0bd5b1740ba510f6f963a"
+      "computedHash": "f0eefce6ce80f76a3645e0ad4cecfd45ef185fed1311e45b1b467d3fedc7bf52"
     },
     "graphql-schema-designer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/graphql-schema-designer/SKILL.md",
-      "computedHash": "81e929bfa3ad19fb3c306f515cb34a980a6ec31c1595d0ecc12de99eb1d9cede"
+      "computedHash": "50a166a3e3177fbc685fd0f192256f12d2986b0cec45ef620ca49a4585641de3"
     },
     "guardrails-safety-filter-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/guardrails-safety-filter-builder/SKILL.md",
-      "computedHash": "c0a393edf28684a25dd0962c51926d7abcfddcd790c992e5f8e9ff8d67d41d56"
+      "computedHash": "8328e9e6ee7b8622b0be147f98a3e48705778b2b5191e5829dc732e130119c94"
     },
     "high-end-visual-design": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/soft-skill/SKILL.md",
-      "computedHash": "f730e4132775f13eea19e3dc39afc6bb453cfc0498872b127ad8f0d47cfd802d"
+      "computedHash": "d5f1d07d14b1e72454e49c4de69adc65022f4eda0126e1902b84a2e0c3fec47b"
     },
     "hot-reload-optimizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/hot-reload-optimizer/SKILL.md",
-      "computedHash": "3859bc0d318c9f4ce7f84c4a9278be80fd103f4ace77bcfd22a3d850a07d0496"
+      "computedHash": "fe6b296e756a3b192ff835bf8bce35f519bda15733253c8eec5236e3062e3d09"
     },
     "i18n-frontend-implementer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/i18n-frontend-implementer/SKILL.md",
-      "computedHash": "c649edaaae8023eef410f9d61101f786ffe1db588c8f5b7a4672886b3a235d0e"
+      "computedHash": "9630be147b3b3e70e1832035ea9e30dcbd186bcc3de985887dde71062f6b7fe9"
     },
     "image-to-code": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/image-to-code-skill/SKILL.md",
-      "computedHash": "3d2ac14d956fdafc5500d2108b90895e134d847f9f199e7f1d18bf1f814cf7c8"
+      "computedHash": "95eb38f750f046fafe47f4c053f2a075ed07f2ae1925774a6f435c81f503fba8"
     },
     "imagegen-frontend-mobile": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/imagegen-frontend-mobile/SKILL.md",
-      "computedHash": "7c1d1dc59cd0df4063b8621af543bf5dea1d576b261507e17b0323c69680b048"
+      "computedHash": "bf3296b937c3fd58c9d1531983bb339ec86d612fe6db7eb5bb48935c838b27d3"
     },
     "imagegen-frontend-web": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/imagegen-frontend-web/SKILL.md",
-      "computedHash": "27255c7c50181e58add156b2aa2bd5325285b85f04027e4c8b73742d98d7be0a"
+      "computedHash": "5494a06e7bd76130ffad8d1f36d26fe28cdd53f3ba27f2f9f4525e487dc1b1bd"
     },
     "impeccable": {
       "source": "pbakaus/impeccable",
       "sourceType": "github",
       "skillPath": ".agents/skills/impeccable/SKILL.md",
-      "computedHash": "ec48c58ca973b42c826d5d3be9069b7023d2361ebf7f89ee56b0bae7eb92390a"
+      "computedHash": "df0fae91fb48ab1e72191d1d007b95bc8e0547e96232b8182177a646e68ded3c"
     },
     "improve-animations": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/improve-animations/SKILL.md",
-      "computedHash": "b913ec7ef2b1aa900060eb6e5dbdccc94b6ea631059ec3474c4b61e2ffefeeb4"
+      "computedHash": "59a9e59e5c4dee0ee2adc9f3fe5663f5f22e0f96fdae5f727812f84c0ae89c54"
     },
     "incident-runbook-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "performance/incident-runbook-generator/SKILL.md",
-      "computedHash": "a34328378ff1fd1831a25304ac9a9b420bd01ab89748afef31bc7a80a8e9bd5d"
+      "computedHash": "78400d20b5932b9c2b3b86ada6eacf3b0a5a86d2bc92ecd12a409e9e2aacc645"
     },
     "industrial-brutalist-ui": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/brutalist-skill/SKILL.md",
-      "computedHash": "e66e5a2a8b73cef79ab6546459c665e8b983645689c5f3772f7eed8b9f1e8e0e"
+      "computedHash": "5a181aaf5fcacff516dbc4773eca28d8cca472733b2b22687c9bf8d10ea73365"
     },
     "input-validation-sanitization-auditor": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/input-validation-sanitization-auditor/SKILL.md",
-      "computedHash": "4848d84b5a3053052f593b9790286e98c15c9c791f2f9d42f55722404ffdcdc8"
+      "computedHash": "d146e98420b4ca8d2f38bfd6559d7fa69ba7ca68b355a7caa1b8a66cc99e84b3"
     },
     "insomnia-collection-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/insomnia-collection-generator/SKILL.md",
-      "computedHash": "3dbb422afcf810e80517a4a94d4e52c8158ee230fe089bfcabbe8f70bcf48fec"
+      "computedHash": "d8683d4239a25e6559807074ca3ca18465ba2cfc75e26694839b75f542660a85"
     },
     "integration-test-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/integration-test-builder/SKILL.md",
-      "computedHash": "0e0dd446edbaccc4c60ba9d6321ce0f4e05629df3866ddd9f48af731fbceec73"
+      "computedHash": "1e659286ed7c17f341f9f1b6c4fbd7801688ad84e863565154724b3391031270"
     },
     "jsdoc-typescript-docs": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/jsdoc-typescript-docs/SKILL.md",
-      "computedHash": "96505a4a52e2cc4b14c942b6a8df66352c960cb5b3c27a26d45e0ea461910e14"
+      "computedHash": "d910522e740fb650c5d9a00bbf0a2bf6a64463a218c9e5412031e67d5e1f8691"
     },
     "kubernetes-manifest-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/kubernetes-manifest-generator/SKILL.md",
-      "computedHash": "83df72d2c299977e150193b6f9fddf387a63984c0c92315f7e1451e1510d1b73"
+      "computedHash": "a9e7bd8fc544b56f267f63864e9a7fcebeaa55b35f5f9911d0c2a5edba140468"
     },
     "langchain-workflow-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/langchain-workflow-builder/SKILL.md",
-      "computedHash": "d7452211c98c8cf9aa729b435336a55a315e9bb3e652fb655bf81cd71508d58f"
+      "computedHash": "dfa4e98100b153020c06a62114ad54b264bb76ba0294d473c4c50764839f0bef"
     },
     "llm-debugger": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/llm-debugger/SKILL.md",
-      "computedHash": "93583d64bfeb0ef77126569a89069639e5d38526d74a6938b610fc44c010f471"
+      "computedHash": "0b2b5fa575a9e3120c21ac618311aacd18d036c062105218d0959450bcc19c29"
     },
     "load-test-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/load-test-builder/SKILL.md",
-      "computedHash": "2374f40dbcee9516b562cb3c418acd1993ed5770b6ed3d63941d2d2babe94b27"
+      "computedHash": "82a84487d02dba8d77e073b8895f25cad0113838aaf2142d86b7bc442c35da13"
     },
     "load-test-scenario-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "performance/load-test-scenario-builder/SKILL.md",
-      "computedHash": "a76fc4c9cd5eba2d274cc3416f9ace976044c2e88df27adc88651da123b194f8"
+      "computedHash": "791fdd97f3d7d70100a32c7ae51bf6ab74050719f6e5700794a03c2d73ccc37e"
     },
     "mcp-server-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/mcp-server-builder/SKILL.md",
-      "computedHash": "3777836d7b2584e1466ecdad0196b1fb8e89f1b2c124edef6b28d109676690c9"
+      "computedHash": "1b12c7bfe81d4aab4639af071da493e7208ed5e8e1be7af9669ac743188b086d"
     },
     "mermaid-diagram-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/mermaid-diagram-generator/SKILL.md",
-      "computedHash": "bfec98982e09b8767331c6872c540a5c275977f26222428c8d02fd49f44b4efb"
+      "computedHash": "2d1160a7f2ea22eabac1075eca2c62bf57d70eee555df2d887f40935faab8ee8"
     },
     "migration-planner": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "architecture/migration-planner/SKILL.md",
-      "computedHash": "47769b11f39670e482032546b41d38310a9be497bcc2ac02a3600100fe3f9487"
+      "computedHash": "68e1e46ea28002d15e78d09d11348de94c94a5e6e33baef32f318c0d32ec5cf7"
     },
     "minimalist-ui": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/minimalist-skill/SKILL.md",
-      "computedHash": "7e88897e0371184e97a82b8d9ef080323c13f21eb067b58ef71eb05173a08ac2"
+      "computedHash": "6fe7616c22141da6f52a9d7d55521d08c519d7de595f154d1d6358ecb988c9be"
     },
     "mobile-native": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/mobile-native/SKILL.md",
-      "computedHash": "8d77850a34ec20f745aed3215aa0d587e90438599bb09dc72d9d09ce896a5765"
+      "computedHash": "2141766c0a370128cbee3dc004d3f254a411e54f8352e154e73b040e52070e38"
     },
     "mocking-assistant": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/mocking-assistant/SKILL.md",
-      "computedHash": "f3fd061946e85e25da9e4b19667161da663c4f057a618641382be35bc0dde2c1"
+      "computedHash": "8d60f8e3b46c2fc33321f3cd6ae7b7f419055ea167580782a0ef0ac003ff0710"
     },
     "modal-drawer-system": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/modal-drawer-system/SKILL.md",
-      "computedHash": "3c267e7c2e5c8584e1ae7d5d4c8063e6da5f06b11f0f062517a086bbfdf133cb"
+      "computedHash": "e9447f4fd81343b63a5726e75769035785a3124d53189ae5d53ae0659f5e6a8a"
     },
     "monorepo-ci-optimizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/monorepo-ci-optimizer/SKILL.md",
-      "computedHash": "4c2bed274f69b5dc8a0d0a4acacdf7614db6e68d792c6e0993b59f0a7fb40363"
+      "computedHash": "366b4eae2369bc2b8e93ce9d3d66022b771095c8dd9db5eb90256e4a8c34ce10"
     },
     "monorepo-setup": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/monorepo-setup/SKILL.md",
-      "computedHash": "5bf53038b5b85fb3f6633a73c550be9afe5c15a24fc6d93005af5327b3e2082f"
+      "computedHash": "59ac8245991daa31b9ac1586545b7e452535adfc5b98e5b74260cdc9abf8fe07"
     },
     "multi-tenant-safety-checker": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "db-management/multi-tenant-safety-checker/SKILL.md",
-      "computedHash": "7ca68da5bf8f07cf467d43be909c1a3ba8b480a2302d1c45ee8cad8e0c5a187c"
+      "computedHash": "4340754f2fb01f86b41e79f91924bc0b57776c4daf4e6d1905351ecbb4836947"
     },
     "nginx-config-optimizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/nginx-config-optimizer/SKILL.md",
-      "computedHash": "3072b057c5d426e5edc1f7215be055f7ca6469264cc1bee0bef8e1de2d560df3"
+      "computedHash": "377980ae97872843b62602b5a3e0322e2e91fc58faf43c180e0e5416121c0dd6"
     },
     "oauth2-oidc-implementer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/oauth2-oidc-implementer/SKILL.md",
-      "computedHash": "f9a0cde980bf955d8ad02d9d5bb7f18c38dedd353c45e29970095f524fd191a1"
+      "computedHash": "c02936f686dbebe341804fbfe3d4c7259270958971ac9ef58111238bb4141a02"
     },
     "observability-setup": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "performance/observability-setup/SKILL.md",
-      "computedHash": "efbc6c1f647b73cbda290ae0fc6a61167d1e35b71d349f5d246ca96313899e10"
+      "computedHash": "4e2edd2687ff9992e76d596342fe86b7489cb1c85baf8733931f96be94f9bb65"
     },
     "openapi-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/openapi-generator/SKILL.md",
-      "computedHash": "6845d6237b4d867cd4490201c03c6eafb076508f970a1b5aa8df2a899f2019ac"
+      "computedHash": "d787f555a0cd6cc8cc07a91928eebf57b45962cc7e7754bfcbeaca478de60369"
     },
     "page-layout-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/page-layout-builder/SKILL.md",
-      "computedHash": "682aa69af578c1e36a1d1cf6da565ccddcad2268eb347141306a830ecbd6941b"
+      "computedHash": "dcc3274d4c67b18d924ab0568227bdb3935c6fc75ffe51b6befc75226f7d033e"
     },
     "performance-budget-setter": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "architecture/performance-budget-setter/SKILL.md",
-      "computedHash": "885a34ba4f8763207523eea46935fb44b67536e51605ebb027b959785f99a4ae"
+      "computedHash": "31fdd8ca503b7c842ef0029679eb3df4bd0a5e058b5bd4f41dba0a5787a15a1b"
     },
     "pick-ui-library": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/pick-ui-library/SKILL.md",
-      "computedHash": "95f37cddc1c5f7cf5c60c8f8f07c938f2ddd1a70dd45f50c37e7e522fcde5bb9"
+      "computedHash": "c5d418c22e298c1c85856dc838190ec366782c0b476752dfae71d32ae8342cd5"
     },
     "pii-redaction-logging-policy-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/pii-redaction-logging-policy-builder/SKILL.md",
-      "computedHash": "18f39ded88ba69cd52fd463f360ad99138508d18bf833bf84ebb31677013ddbb"
+      "computedHash": "6d011af75354c1193e1afd23923edc3802aeb01b0f24b8c2670dae5aa18cc8f9"
     },
     "postman-collection-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/postman-collection-generator/SKILL.md",
-      "computedHash": "2b66fcb334e6eab11e64fc19525fa9c75ef8e6b301dd819b2d57d4792d9ccf9f"
+      "computedHash": "5fa3002ef4bf5e793f34d5f4b4ed248239cc62d2b88b3e483c8f5d191b0b049b"
     },
     "postmortem-writer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "performance/postmortem-writer/SKILL.md",
-      "computedHash": "ce635a5ee2a4496fcad39d46bc908085c2c0d256e16640f2bba55eea8df571a3"
+      "computedHash": "c7c0bdbdc64500f1629b53c2a3979830b86d518eb20306e8d0423d821ce429ea"
     },
     "pr-template-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/pr-template-builder/SKILL.md",
-      "computedHash": "739cc0cebc147faf3ae27c9062fdbcb3bb78bc1e8c79663b319499df6fba8a07"
+      "computedHash": "0202d479565842298b0525b96cf6b57b6c861d161e0997783692817415fe3e1b"
     },
     "preview-environments-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/preview-environments-builder/SKILL.md",
-      "computedHash": "06657876d913b23b99e9bafa5d2363a8afd257185d6d2d39cd5b649a00ac11f5"
+      "computedHash": "1058de5b92b1aa775fb5621c08a514601fbca5bcf5a0228d4c77a5e70f89b3f3"
     },
     "prisma-migration-assistant": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "db-management/prisma-migration-assistant/SKILL.md",
-      "computedHash": "024024bc2fa475f2750c8fa5e501c0df1b3f5282f0f4eaa3ff58ad56f59d1fee"
+      "computedHash": "d31fc93adf968da546070e0eec030c1b1de1da3a47ad2e0c13f907e17b5052a3"
     },
     "project-scaffolder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/project-scaffolder/SKILL.md",
-      "computedHash": "2580f91f84b6bce3833418ca5b0f8105eebb3c7490c7569df8f418de6ddff310"
+      "computedHash": "c8966527449ee9e4cabca34bb3a529e7f2143f4dd3605f1848225be410d1d144"
     },
     "prompt-regression-tester": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/prompt-regression-tester/SKILL.md",
-      "computedHash": "c6e69028d8b319e9eed9bdcb4749bf634a744693386a9d7330ffe41457be1c3d"
+      "computedHash": "45e7764b40bdc89fc6cabdb16c0b7d8233a7b10943355a6545ca314b420bcabb"
     },
     "prompt-template-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/prompt-template-builder/SKILL.md",
-      "computedHash": "e9eccd3b51b75d96eda3ef96481967f00a995ae3857c11940313441a856d2b23"
+      "computedHash": "b2675f952d06196715a443d0f6c0a8e3c800150737041dbb7ed8510d058a002f"
     },
     "prototype": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/prototype/SKILL.md",
-      "computedHash": "165c803775adbe0df600b961167747b6ba6577e6e1dc9ae1b87fcf5dee800645"
+      "computedHash": "c9b2890f9c5f4cff4e05d097549dd633c3f17db3c7378b5b7baa823c9f220bf2"
     },
     "quality-gates-enforcer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/quality-gates-enforcer/SKILL.md",
-      "computedHash": "a3b756950f7a7b05040378e22b229eb299254a6061475ac1abfbdfab079530b0"
+      "computedHash": "52f9e187d07cf4217261d82c488d204c534bc33aaedc3c2a8e1fb06c7fbed241"
     },
     "queue-job-processor": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/queue-job-processor/SKILL.md",
-      "computedHash": "bc176ac7ab93adf033e7941ddc7452cabf22566c5ae3d6536e3a76f89f577f5f"
+      "computedHash": "151ba33f2df4f0611fa8c16dc47d07e6919766ff99475bdd50a7b2435743c84d"
     },
     "rag-pipeline-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/rag-pipeline-builder/SKILL.md",
-      "computedHash": "2c75dd4a8b5239b26594a0d805512fcdf6efd6bd8cdad8330c69d3ac5ffbcaf8"
+      "computedHash": "1d806710ddd87741ae5f1188eb2efb34cfa0bbdb1f94fb433484172cd14d67ba"
     },
     "rate-limiting-abuse-protection": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/rate-limiting-abuse-protection/SKILL.md",
-      "computedHash": "565eefd3a90e2aafe9a9b0196ce4831ac055f50c1477970f27697c81fc0414a6"
+      "computedHash": "69decc141811e302560d06f38507f278f8ddae0f3532a89abc51a69372db1f0d"
     },
     "rbac-permissions-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/rbac-permissions-builder/SKILL.md",
-      "computedHash": "2b6cd21df0aa9694d6ef392f9e3d4fbf1cd9424b422c3d460f28809a609f7ac1"
+      "computedHash": "3730ee27341a69bfe54e92ff1179ce8760f194127a0f6cc8d83afe63a233bf6f"
     },
     "rbac-policy-tester": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/rbac-policy-tester/SKILL.md",
-      "computedHash": "2be2dec184282292d042b6f393314c549facaef94e053363d4f4b8cfcacad41b"
+      "computedHash": "5159ae8ba945a45b14b2b90b2bcd5fdd65462390d881e5b0cda7e9ebf4604695"
     },
     "react-hook-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/react-hook-builder/SKILL.md",
-      "computedHash": "72de98279aec0a2f3454ee7e00ae108aa671b4f4dac7f0c824fed948d633ebfd"
+      "computedHash": "e7631bef8a8bc374caf5d40fba533f3cc7dc2eddfa07f5905ba8c253a4ebea66"
     },
     "react-server-components": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/react-server-components/SKILL.md",
-      "computedHash": "b9ada304d1dc993e06713e65f113edafed8639067cce5bd3cf1d29c3f7cac0cc"
+      "computedHash": "0483b7e1cfe1473e5c7861243b67e65761821091cd1b02495b45ae8c8e75021d"
     },
     "readme-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/readme-generator/SKILL.md",
-      "computedHash": "0740f57c47da13cb1cf6d0648a1cf42a45b7e21366c05b30b4bf11c1332b4226"
+      "computedHash": "716977323587b249700ec14464b3d4f37aa61e13ebf5ea323ae54027f6a1426c"
     },
     "redesign-existing-projects": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/redesign-skill/SKILL.md",
-      "computedHash": "47eced3e960a2c961d3cbee11fa1216264f589344b586a5cbd03967cd6b9c54b"
+      "computedHash": "a462c359ad5d5d2d96d18f9c1d2abefdf08318a1ec78f7852660d51ae098be4f"
     },
     "redis-patterns": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "performance/redis-patterns/SKILL.md",
-      "computedHash": "7eb79e5ecbf791cd9a7c85400cb336a800e22ffff2238aaf161dfcc73523f396"
+      "computedHash": "196edd7b160bcfee5f6bcd5f87e2ee7ece0eb355bff73d14e25d13c63d6fed87"
     },
     "release-automation-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/release-automation-builder/SKILL.md",
-      "computedHash": "c5befe36915e56b0e58bdf3ab7763f72d7685357c7a457f46477da474014c4b0"
+      "computedHash": "3fc6038b5397deb9e2d094b5384b8125c9e4d3e2e0b1f028ba7affe99211ae0a"
     },
     "reliability-strategy-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "architecture/reliability-strategy-builder/SKILL.md",
-      "computedHash": "2de65bf123d19840a66577c895341f9c61bdd333d7eefb948399564db621da36"
+      "computedHash": "446a248599ebbd0ace946bc10df8a4c80bbb28e46a84429284a8479eb51a418f"
     },
     "responsive-design-system": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/responsive-design-system/SKILL.md",
-      "computedHash": "0003ce8ee7d56d26b35e3c56f83369f26e156edef5735b54eb42db355b831466"
+      "computedHash": "0d68ce2e9cd2883d8df72be45c8c356925287bf219b767920fd49d824b8325c0"
     },
     "rest-to-graphql-migrator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/rest-to-graphql-migrator/SKILL.md",
-      "computedHash": "7dc155f4e7d3b8ad3a3caea2a0b626d8fd04e3e5b5e8388eaedcf28adfeb4c78"
+      "computedHash": "5cfa8e17ef5cc9bbaae6e333ba45e381af1f2c2ed5a6170b63bc1df0b69542b4"
     },
     "review-animations": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/review-animations/SKILL.md",
-      "computedHash": "8c2befeb28bb484bf2de7b2fc228774857e266d32a65d76895e78651a536d8cf"
+      "computedHash": "f3c25b26369923340e82b181569cdcca7e803a2f19600cfdca85d559f92e6e8f"
     },
     "rfc-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "architecture/rfc-generator/SKILL.md",
-      "computedHash": "da2875ca08102a5a75f646b872a06bf749aa359894ab9e2bdc58257595af8115"
+      "computedHash": "aa960d108005ee143dbd6df718ed93eb92be0de114d55de56ff8601ccc8d168a"
     },
     "rollback-workflow-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/rollback-workflow-builder/SKILL.md",
-      "computedHash": "b8e8e4f96efa19dfbc173d6936e953871a95c6b0a0eea2f457f96ae44aa96e75"
+      "computedHash": "5b09ced98cd66801391b75fc128555c03425afdcf16cd521dc0cc010048516fc"
     },
     "scalability-playbook": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "architecture/scalability-playbook/SKILL.md",
-      "computedHash": "03d5a8c44ebcc1de3273e75e951740ac9ddac122e2c3abededa7af58979f492a"
+      "computedHash": "5800567b1792d42397d59f9ee977f88caaacbd674548069f1384ff19d0c83beb"
     },
     "schema-consistency-checker": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "db-management/schema-consistency-checker/SKILL.md",
-      "computedHash": "c838c80a9534cb2030fcceaf0d83279493721ddbdeaf6dff0a4dc1d708ec2ce3"
+      "computedHash": "1dc5e609486d07e0a0444d8f7a3e65ca7702453a477d96a63eeedc66c654cc85"
     },
     "secrets-env-manager": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/secrets-env-manager/SKILL.md",
-      "computedHash": "84bd05119619ab80d00f4050f4c7a289c405558114ef42e68b01a6bc5bebb292"
+      "computedHash": "f8bb9c96c7a59c66e348d8591a01ff7917c05eac0c77b131776161d5a533a6de"
     },
     "secrets-scanner": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/secrets-scanner/SKILL.md",
-      "computedHash": "31cff25a1c245fd1f7d7c469b322ee2fa9e3ed0719a512ef5fc17ca3648cae0c"
+      "computedHash": "2998da57c98bff2fd6c49f25759ce70ef78f688b21107b9706365e694acb362f"
     },
     "secure-headers-csp-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/secure-headers-csp-builder/SKILL.md",
-      "computedHash": "b246a09a500f2ad3ef089d6d902dc9f473b209b94feec7ee886d85ed73e87b6e"
+      "computedHash": "68a5a400ac97bff18453964e47bd88d3aa2a59896945b1cce1e80daaaec8f21b"
     },
     "security-incident-playbook-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/security-incident-playbook-generator/SKILL.md",
-      "computedHash": "6b2dd980b8d3bea8134313dd7ec092050bee59dde436e5018f723b307710013a"
+      "computedHash": "6cfa2e51983abccba820476372193cedeee8286bdeb3e854e7add0374810e889"
     },
     "security-pr-checklist-skill": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/security-pr-checklist-skill/SKILL.md",
-      "computedHash": "c496983e1eeb9846b8dc72c00ba7d87157499c3eade0bc922173662a1693d87a"
+      "computedHash": "c9bf5780f09a8d345ee75a20a54ed3b96e6dbf5ba91426f3d8518bfa1415a24a"
     },
     "service-layer-extractor": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/service-layer-extractor/SKILL.md",
-      "computedHash": "71df51a07cc4dececabb502e9eb9932bffe7423c76c07ddbf2f2c994ef10c1d1"
+      "computedHash": "0f852e7fb91261fc15fdc278f7f85ceb1e729763ce82c454d9dbec2be33be320"
     },
     "skill-creator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/skill-creator/SKILL.md",
-      "computedHash": "db17aa30f19cf2ed417a43c8446243262f7b2d079f88338c98b2f6fd11e74c80"
+      "computedHash": "ebfb0d731ac6d3d4eb4ba0e06f580560558d790ab902e4c7380fc7e6124fe2b6"
     },
     "slides": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
       "skillPath": ".claude/skills/slides/SKILL.md",
-      "computedHash": "c27a4e6f6101cb45f9a717888784aba649c1c516cd1a1e9871f630ab15ad1800"
+      "computedHash": "059825b15a508a5f1533ab646f968ffcbcdbb8eadd76c2d122151bfbcf19d287"
     },
     "snapshot-test-refactorer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/snapshot-test-refactorer/SKILL.md",
-      "computedHash": "c0aff5d4178953bfd42f4bc8ea1ce4f36a9f21f3eacdb4763401498d8ee64d2d"
+      "computedHash": "5eafaa3b12ad48ed9ae983aa7e93404089c8f136ba50529df901116b6510a0c1"
     },
     "sql-query-optimizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "db-management/sql-query-optimizer/SKILL.md",
-      "computedHash": "3cead3051fe03b87a050fbfb2adadf6e07864cb782a36429034f7a282a9c7c45"
+      "computedHash": "305f1f4a75849c257f454f5d238f57763861e58ddb7de828844cb45cbc01494a"
     },
     "state-ux-flow-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/state-ux-flow-builder/SKILL.md",
-      "computedHash": "ac299c5d7eb04fbada3987a34e49743291817abe3fc00c4339abc78b887fbd97"
+      "computedHash": "5d1e573594b75c0f527a9769ff98f8a6643573d298286c92a42d0a0d540603a5"
     },
     "stitch-design-taste": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
       "skillPath": "skills/stitch-skill/SKILL.md",
-      "computedHash": "c96b580192b34167efa01f460bbc669ff4315cf97f3cf6ff85ded8029aa720b8"
+      "computedHash": "b0fed0044377622a841738e7742bc99d5afbae288e9e0c0021707cc401bb63b1"
     },
     "storybook-setup": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/storybook-setup/SKILL.md",
-      "computedHash": "013dbec7dc96b8339a8f76db22983b94510731ff2fe6ddad3191f8d4fcb57b1a"
+      "computedHash": "d68fe4719f1d8ebbf7d4f081ed54f39e94583241b70addf2cfe53ed7ec3aa28e"
     },
     "structured-logging-standardizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "performance/structured-logging-standardizer/SKILL.md",
-      "computedHash": "65459b635c004ce3073bdd56562a4af19bf315dee833cbd1f035c05c09525f5b"
+      "computedHash": "c40a6affd3ef015945eae7c881277914fbd7049316f85417e654fd78cd0d4270"
     },
     "structured-output-extractor": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/structured-output-extractor/SKILL.md",
-      "computedHash": "069e2df47256f9a178934b0b7352406c6c797580f53d54b2536add785e6cd1bf"
+      "computedHash": "b413f14236a069489727cb6165249f38e4ae470b1530a485f29ff62ce38d8b3a"
     },
     "system-design-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "architecture/system-design-generator/SKILL.md",
-      "computedHash": "22f5fb395b7c65b0b473d075beb2e3dfe9a7adb9932d82fac9177869450ade99"
+      "computedHash": "e261df1bf4d9cdfab4d6c6d6a496403ac09511bdfab3d2e0e4e96b68ee2d58aa"
     },
     "table-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/table-builder/SKILL.md",
-      "computedHash": "644f15a7c2007ec6ac58848f8ad028f0d706f1a2f1811e93993aa9dd5be589a9"
+      "computedHash": "860ddcf7f4d221f83a69644e8d80e1e418d8f9fa1ef82cc010fa530f635645ca"
     },
     "tailwind-gradient-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/tailwind-gradient-builder/SKILL.md",
-      "computedHash": "051b6ee557c070ea5fc357c7aee66f66a1341c9fba184c58cf0be5be78a800f5"
+      "computedHash": "e9d97231455b44211bec199625eb7c5fc8a2883b5c00769393f3da831a1fe041"
     },
     "tanstack-query-setup": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/tanstack-query-setup/SKILL.md",
-      "computedHash": "5f5eb01fddea44d6062e3dd7e37b5f4cb7e462a37fe528501f9c02fe42cf8b5c"
+      "computedHash": "35ac80d608efcf31be8a7e70f27824b691f2fc8aeacff62734728f9a9f3a2655"
     },
     "tech-debt-prioritizer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "architecture/tech-debt-prioritizer/SKILL.md",
-      "computedHash": "992b8fa77a10952d9f77df6b032c00632111aa729cdbf2570e02238957b908d4"
+      "computedHash": "ecfdd20fdbbf1f6db177fa07c943da03ba69d1fb81882ed63bca4bcac9070ace"
     },
     "terraform-module-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ci-cd/terraform-module-builder/SKILL.md",
-      "computedHash": "e63b002230173f0293702ef09a5208a6123db22bea46f8e2c8498f76f705e410"
+      "computedHash": "c771cf0109f6e0129ca1294213e289b5a92709dcba062916d88ccccb5c67ec3f"
     },
     "test-data-factory-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/test-data-factory-builder/SKILL.md",
-      "computedHash": "655f5ba5389241a021313d9a1b384c19a3b0ad3672206cf6bcb8760708fa832d"
+      "computedHash": "b7493bb3142be702f528c43a9724675d869749b7315fe82c8bd0d2e2e64fd207"
     },
     "test-reporting-triage-skill": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/test-reporting-triage-skill/SKILL.md",
-      "computedHash": "96f7dee0471575d83106d3fe886c6562f1d206af79b883701255007cb8ef4394"
+      "computedHash": "3eade4c997e5e74d6a99a76f831eb1982babea9ae65bcf87977c6fb712819b88"
     },
     "threat-model-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "security/threat-model-generator/SKILL.md",
-      "computedHash": "d54f0e32cc47a7234ba8742b980b857b61c04f10b3f3ad993a218fc9d6da115d"
+      "computedHash": "e5045dbaf962f705766b87df33bead2deb25927716b3559c65d56e3f177ea230"
     },
     "tool-function-schema-designer": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/tool-function-schema-designer/SKILL.md",
-      "computedHash": "fcdd8797df6cb2d90914a7a15b18abdeb98f7ad1666abca42350666e53021122"
+      "computedHash": "9414bcdc97408660757a7572547a58c9d9677501eb9941f58f1e955c4a666429"
     },
     "typescript-strict-migrator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/typescript-strict-migrator/SKILL.md",
-      "computedHash": "1156c04944b039b11129268851d3eee4e77f4541ccacbd4008a2390cf396d98e"
+      "computedHash": "196506e799555d3becd73fee68eba2375e2c4d477e453f4bb1746e56856ca45d"
     },
     "ui-styling": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
       "skillPath": ".claude/skills/ui-styling/SKILL.md",
-      "computedHash": "0b5ee9163cc894c55e1ad1fec06fcffba2af85c8991cde03fbe93a2b72eff322"
+      "computedHash": "5ede8b215ee9542076a5eba000d1f9e2b5eae3eca90b264633cc5891fadb67e9"
     },
     "ui-ux-pro-max": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
       "skillPath": ".claude/skills/ui-ux-pro-max/SKILL.md",
-      "computedHash": "3f1e66e08e3d1d3feaf2a3187705022812e0bece8ff5bee80fe7cf782f26fe8b"
+      "computedHash": "551d964daa9ee76d4dca2f7bb97e0ffb59c41d17db216028c0e477e5fc357346"
     },
     "unit-test-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/unit-test-generator/SKILL.md",
-      "computedHash": "6bb3f6804b00dcb9e574ab8e8830bdd31bf584625e3a50ac794f9c3da48f4234"
+      "computedHash": "c082d9312051aceb4128f3504d3ff263d7ae7913c0258d6aadf55f7273fb7dbd"
+    },
+    "untangle-codebase": {
+      "source": "caldoai/skills",
+      "sourceType": "github",
+      "skillPath": "skills/untangle-codebase/SKILL.md",
+      "computedHash": "73791c30d4da2e001bc095732771966338b764e2e7b57bb30a81439cff85aef4"
     },
     "vector-db-setup": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "ai-engineering/vector-db-setup/SKILL.md",
-      "computedHash": "cdf87239b577b6054d9d2ff98b90241df199d7eb04b67ebb291500b05016c6a1"
+      "computedHash": "411fc255079f06db65415503908b815a4c81a347d6f0058b6a211652879edc2d"
     },
     "visual-regression-tester": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/visual-regression-tester/SKILL.md",
-      "computedHash": "833154f2ccbf3d3606b74c223efa96693a814a0714dd85a2bce7bd69bf8f3762"
+      "computedHash": "dad990e9ebc77ec20d1a04b97474fa16aadc16278ae3ce41b7e4e565ff420a6c"
     },
     "vscode-rest-client-generator": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "testing/vscode-rest-client-generator/SKILL.md",
-      "computedHash": "4cd11e995ac415505396a1efe744bdb4f2fc2c381305bae8b3cf223bad148dd7"
+      "computedHash": "fd9c582e172045868524e313259077e556fdcb3cd44ef9c3bf59fc3d8d92928f"
     },
     "vscode-workspace-setup": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "foundation/vscode-workspace-setup/SKILL.md",
-      "computedHash": "f118f83dc44c62b46043e134cbed92f2fcff4b91be1eb8f92eca83f9a1679aff"
+      "computedHash": "3b1c658258e9cdcf9ed55b931c6898df6768a5a2448fa85e83c67146cb65eea3"
     },
     "webhook-receiver-hardener": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/webhook-receiver-hardener/SKILL.md",
-      "computedHash": "4b15336aa369e000bd6d96aef1304e300038d6c1e9e32338af4183dd125a8f34"
+      "computedHash": "9a3efcdacbb1eab4ff6f03ca71738984a9dc7d72429643a0e634340fffa7a35b"
     },
     "websocket-realtime-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "backend/websocket-realtime-builder/SKILL.md",
-      "computedHash": "07a788bf6cd68f0f94ae06f8f71884c2976b4832767d4a928155776a43252d74"
+      "computedHash": "68c0d589317053c7d585fc9b6c10c52d9d973aac3e88f9bb52c033e66d9926e9"
     },
     "write-swift": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
       "skillPath": "skills/write-swift/SKILL.md",
-      "computedHash": "3c4854221f2c654172c3532e71dcb4ece25ef62057d97bec1c26c3ab17eca191"
+      "computedHash": "aba96f69500a765c53e6230e036aacaf1e98f81d5eefd1a15d10d6706dd27b97"
     },
     "zustand-state-builder": {
       "source": "patricio0312rev/skills",
       "sourceType": "github",
       "skillPath": "frontend/zustand-state-builder/SKILL.md",
-      "computedHash": "7de1986db3cd23f99736d5ed1cf4d6e0f06715ff5e77774e1851dd76e87e8650"
+      "computedHash": "d491e5c3cc3f95210d01f48cd70a5c9ce72340149375651717b6627ba609f1be"
     }
   }
 }
