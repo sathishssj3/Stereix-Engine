@@ -190,17 +190,19 @@ code{font-family:var(--mono)}
   margin-inline:auto;
   padding-inline:1.5rem;
   border-radius:10px;
-  background:rgba(8, 8, 11, 0.78);
-  backdrop-filter:blur(24px) saturate(140%);
-  -webkit-backdrop-filter:blur(24px) saturate(140%);
-  border:1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:0 12px 36px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background:rgba(10, 10, 14, 0.42);
+  backdrop-filter:blur(32px) saturate(220%) brightness(108%);
+  -webkit-backdrop-filter:blur(32px) saturate(220%) brightness(108%);
+  border:1px solid rgba(255, 255, 255, 0.12);
+  border-top-color:rgba(255, 255, 255, 0.28);
+  box-shadow:0 16px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(0, 0, 0, 0.35);
   transition:all .3s var(--ease);
 }
 .nav.stuck .nav-in{
-  background:rgba(6, 6, 8, 0.92);
-  border-color:rgba(255, 255, 255, 0.14);
-  box-shadow:0 16px 40px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  background:rgba(8, 8, 12, 0.78);
+  border-color:rgba(255, 255, 255, 0.16);
+  border-top-color:rgba(255, 255, 255, 0.32);
+  box-shadow:0 18px 44px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   transform:translateY(-2px);
 }
 .brand{font-family:var(--display);font-weight:800;letter-spacing:.08em;font-size:1.05rem;
@@ -378,7 +380,87 @@ code{font-family:var(--mono)}
 .btn-primary::before{background:#fff}
 .btn-primary:hover{color:var(--void);box-shadow:0 8px 26px rgba(220, 20, 60,.4)}
 .btn-row{display:flex;flex-wrap:wrap;gap:.85rem;margin-top:2.4rem}
-.hero .btn-row{display:flex;justify-content:center;align-items:center;gap:.85rem;margin:0 auto 2.75rem}
+.hero .btn-row,
+.hero-glass-dock {
+  display:inline-flex;
+  justify-content:center;
+  align-items:center;
+  gap:.85rem;
+  margin:0 auto 0;
+  padding: 8px 12px;
+  background: rgba(14, 14, 18, 0.55);
+  backdrop-filter: blur(24px) saturate(190%);
+  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-top-color: rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-sizing: border-box;
+  transition: transform 0.25s var(--ease), box-shadow 0.25s var(--ease), border-color 0.25s ease;
+}
+.hero-glass-dock .btn-notify {
+  min-width: 200px;
+  height: 2.6rem;
+  padding: 0 1.5rem;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.hero-glass-dock .rainbow-github-btn {
+  min-width: 200px;
+}
+.hero .btn-row:hover,
+.hero-glass-dock:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  border-top-color: rgba(255, 255, 255, 0.32);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.65), 0 0 24px rgba(220, 20, 60, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* Apple & Trendy Headline Accents */
+.hero-accent-word {
+  color: var(--red);
+  text-shadow: 0 0 28px rgba(220, 20, 60, 0.45);
+}
+
+.hero-headline {
+  position: relative;
+  margin-bottom: 1.5rem;
+}
+
+.hero .lede {
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9);
+  margin: 0 auto 2rem;
+}
+
+.headline-line {
+  position: relative;
+  display: block;
+}
+
+.headline-accent-bar {
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: min(220px, 50%);
+  height: 2px;
+  transform: translateX(-50%) scaleX(0);
+  transform-origin: center;
+  background: linear-gradient(90deg, transparent 0%, var(--red) 50%, transparent 100%);
+  box-shadow: 0 0 8px rgba(220, 20, 60, 0.5);
+  pointer-events: none;
+  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.8s ease;
+  opacity: 0;
+  z-index: 3;
+}
+
+.headline-accent-bar.active {
+  transform: translateX(-50%) scaleX(1);
+  opacity: 0.9;
+}
 
 /*
 From Uiverse.io by elijahgummer - https://uiverse.io/elijahgummer/unlucky-rattlesnake-65
@@ -512,21 +594,49 @@ MIT License, Copyright (c) elijahgummer (Elijah W Gummer)
 
 /* ---------- hero ---------- */
 .hero{
-  min-height:calc(100vh - 4.25rem);
-  min-height:calc(100svh - 4.25rem);
-  margin-top:4.25rem;
+  min-height:100vh;
+  min-height:100svh;
+  margin-top:0;
   position:relative;
   display:flex;
   flex-direction:column;
   justify-content:center;
   align-items:center;
-  padding:1rem 0 1.5rem;
+  padding:5.5rem 0 2rem;
   box-sizing:border-box;
+  overflow:hidden;
 }
+
+.hero-ascii-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.94;
+}
+
+.hero-ambient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 62% 40% at 50% 50%,
+    rgba(220, 20, 60, 0.18) 0%,
+    rgba(220, 20, 60, 0.045) 50%,
+    transparent 80%
+  );
+  z-index: 1;
+}
+
 /* Deliberately wider than --maxw: the title bleeds past the body column so it
    reads as the loudest thing on the page. It still lands inside the nav's
    bounds, so nothing looks misaligned. */
 .hero-in{
+  position:relative;
+  z-index:2;
   width:100%;
   max-width:1560px;
   margin-inline:auto;
@@ -1536,11 +1646,11 @@ body::-webkit-scrollbar {
     box-sizing: border-box;
   }
   .hero {
-    min-height: calc(100svh - 3.75rem) !important;
-    min-height: calc(100dvh - 3.75rem) !important;
-    margin-top: 3.75rem !important;
-    padding-top: clamp(1rem, 3vh, 2.5rem) !important;
-    padding-bottom: clamp(1.5rem, 4vh, 3rem) !important;
+    min-height: 100svh !important;
+    min-height: 100dvh !important;
+    margin-top: 0 !important;
+    padding-top: clamp(4.5rem, 8vh, 5.5rem) !important;
+    padding-bottom: clamp(1.5rem, 3vh, 2.5rem) !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: center !important;
@@ -1559,7 +1669,7 @@ body::-webkit-scrollbar {
     font-size: 0.65rem !important;
     letter-spacing: 0.16em !important;
     padding: 0.38rem 0.75rem !important;
-    margin-bottom: 2.25rem !important;
+    margin-bottom: 1.5rem !important;
     gap: 0.45rem !important;
   }
   .d1 {
@@ -1580,7 +1690,7 @@ body::-webkit-scrollbar {
     font-size: 0.9rem !important;
     line-height: 1.65 !important;
     max-width: 42ch !important;
-    margin: 0 auto 2.35rem !important;
+    margin: 0 auto 1.75rem !important;
     color: #8E8E96 !important;
   }
   .hero .btn-row {
@@ -1590,7 +1700,7 @@ body::-webkit-scrollbar {
     align-items: center !important;
     width: auto !important;
     max-width: 100% !important;
-    margin: 0 auto 2.75rem !important;
+    margin: 0 auto 0 !important;
     gap: 0.85rem !important;
   }
   .hero .btn-row .btn {
@@ -1958,11 +2068,11 @@ body::-webkit-scrollbar {
     --gutter: 1.25rem;
   }
   .hero {
-    min-height: calc(100svh - 3.75rem) !important;
-    min-height: calc(100dvh - 3.75rem) !important;
-    margin-top: 3.75rem !important;
-    padding-top: clamp(1rem, 3vh, 2rem) !important;
-    padding-bottom: clamp(1.5rem, 4vh, 2.5rem) !important;
+    min-height: 100svh !important;
+    min-height: 100dvh !important;
+    margin-top: 0 !important;
+    padding-top: clamp(4.25rem, 8vh, 5.5rem) !important;
+    padding-bottom: clamp(1.5rem, 3vh, 2.5rem) !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: center !important;
@@ -1999,7 +2109,7 @@ body::-webkit-scrollbar {
     font-size: 0.9rem !important;
     line-height: 1.6 !important;
     max-width: 34ch !important;
-    margin: 0 auto 1.85rem !important;
+    margin: 0 auto 1.5rem !important;
     color: #8E8E96 !important;
   }
   .hero .btn-row {
@@ -2009,7 +2119,7 @@ body::-webkit-scrollbar {
     align-items: center !important;
     width: 100% !important;
     max-width: 340px !important;
-    margin: 0 auto 2.25rem !important;
+    margin: 0 auto 0 !important;
     gap: 0.75rem !important;
   }
   .hero .btn-row .btn {
@@ -2084,7 +2194,7 @@ body::-webkit-scrollbar {
   .hero .btn-row {
     flex-wrap: wrap !important;
     gap: 0.45rem !important;
-    margin: 0 auto 1.35rem !important;
+    margin: 0 auto 0 !important;
   }
   .hero .btn-row .btn {
     padding: 0.42rem 0.75rem !important;
@@ -2173,24 +2283,31 @@ body::-webkit-scrollbar {
 
 <!-- ============ HERO ============ -->
 <header class="hero" id="top">
+  <!-- Fluid ASCII Canvas background on Crimson Red -->
+  <canvas id="heroAsciiCanvas" class="hero-ascii-canvas" aria-hidden="true"></canvas>
+  <div class="hero-ambient" aria-hidden="true"></div>
+
   <div class="hero-in">
 
     <div class="hero-copy">
       <span class="hero-tag"><b>●</b> OpenXR · DX11 · DX12 · Vulkan</span>
 
-      <h1 class="d1">
-        <span class="ghost pre" data-ghost="ONE CLICK."><span>ONE CLICK.</span></span>
-        <span class="ghost pre" data-ghost="ANY GAME IN VR."><span>ANY GAME IN VR.</span></span>
+      <h1 class="d1 hero-headline" id="heroHeadline" aria-label="ONE CLICK. ANY GAME IN VR.">
+        <span class="headline-line" id="heroLineOne">
+          <span class="ghost pre" data-ghost="ONE CLICK."><span>ONE CLICK.</span></span>
+        </span>
+        <span class="headline-line" id="heroLineTwo">
+          <span class="ghost pre" data-ghost="ANY GAME IN VR."><span>ANY GAME IN <span class="hero-accent-word">VR.</span></span></span>
+        </span>
       </h1>
 
-      <p class="lede">
+      <p class="lede hero-description">
         Play your flat PC games in full 6DOF VR with one click.
         Real-time 3D depth, delivered straight to any OpenXR headset.
       </p>
 
-      <div class="btn-row">
+      <div class="hero-glass-dock btn-row">
         <a class="btn btn-primary btn-notify" href="#waitForm"><span>Notify me</span></a>
-        <a class="btn btn-ghost" href="#pipeline"><span>See how it works</span></a>
         <!-- From Uiverse.io by elijahgummer - https://uiverse.io/elijahgummer/unlucky-rattlesnake-65
              MIT License, Copyright (c) elijahgummer (Elijah W Gummer) -->
         <a
@@ -2221,18 +2338,9 @@ body::-webkit-scrollbar {
                 fill-rule="evenodd"
               ></path>
             </svg>
-            <span class="star-num" id="githubStarCount">11</span>
+            <span class="star-num" id="githubStarCount">2</span>
           </div>
         </a>
-      </div>
-
-      <!-- ============ STAT RAIL ============ -->
-      <div class="rail-bar">
-        <div class="rail">
-          <div><b class="mono">3</b><span>Graphics APIs</span></div>
-          <div><b class="mono">6</b><span>Shipped profiles</span></div>
-          <div><b class="mono">11.1<small>ms</small></b><span>Frame budget</span></div>
-        </div>
       </div>
     </div>
 
@@ -3520,6 +3628,166 @@ document.querySelectorAll('.btn-notify, a[href="#waitForm"], a[href="#waitEmail"
       closeModal();
     }
   });
+}
+
+/* ---------- Hero Background: Crimson Fluid ASCII Wave ---------- */
+{
+  const canvas = document.getElementById('heroAsciiCanvas');
+  const heroSection = document.getElementById('top');
+  if (canvas && heroSection) {
+    const ctx = canvas.getContext('2d');
+    let width = 0, height = 0, cols = 0, rows = 0;
+    const cellW = 12, cellH = 14;
+    // PlayStation gaming symbols: cross (✕), circle (○), triangle (△), square (□)
+    const CHARS = [' ', ' ', '·', '✕', '○', '△', '□'];
+
+    // Fast 2D Simplex Noise generator
+    const SimplexNoise = (function() {
+      const p = new Uint8Array(256);
+      for (let i = 0; i < 256; i++) p[i] = Math.floor(Math.random() * 256);
+      const perm = new Uint8Array(512), permMod12 = new Uint8Array(512);
+      for (let i = 0; i < 512; i++) {
+        perm[i] = p[i & 255];
+        permMod12[i] = (perm[i] % 12);
+      }
+      const grad3 = new Float32Array([
+        1,1,0, -1,1,0, 1,-1,0, -1,-1,0,
+        1,0,1, -1,0,1, 1,0,-1, -1,0,-1,
+        0,1,1, 0,-1,1, 0,1,-1, 0,-1,-1
+      ]);
+      return {
+        noise2D: function(xin, yin) {
+          let n0 = 0, n1 = 0, n2 = 0;
+          const F2 = 0.5 * (Math.sqrt(3.0) - 1.0);
+          const s = (xin + yin) * F2;
+          const i = Math.floor(xin + s);
+          const j = Math.floor(yin + s);
+          const G2 = (3.0 - Math.sqrt(3.0)) / 6.0;
+          const t = (i + j) * G2;
+          const X0 = i - t;
+          const Y0 = j - t;
+          const x0 = xin - X0;
+          const y0 = yin - Y0;
+          const i1 = x0 > y0 ? 1 : 0;
+          const j1 = x0 > y0 ? 0 : 1;
+          const x1 = x0 - i1 + G2;
+          const y1 = y0 - j1 + G2;
+          const x2 = x0 - 1.0 + 2.0 * G2;
+          const y2 = y0 - 1.0 + 2.0 * G2;
+          const ii = i & 255;
+          const jj = j & 255;
+          const gi0 = permMod12[ii + perm[jj]] * 3;
+          const gi1 = permMod12[ii + i1 + perm[jj + j1]] * 3;
+          const gi2 = permMod12[ii + 1 + perm[jj + 1]] * 3;
+          let t0 = 0.5 - x0 * x0 - y0 * y0;
+          if (t0 >= 0) { t0 *= t0; n0 = t0 * t0 * (grad3[gi0] * x0 + grad3[gi0 + 1] * y0); }
+          let t1 = 0.5 - x1 * x1 - y1 * y1;
+          if (t1 >= 0) { t1 *= t1; n1 = t1 * t1 * (grad3[gi1] * x1 + grad3[gi1 + 1] * y1); }
+          let t2 = 0.5 - x2 * x2 - y2 * y2;
+          if (t2 >= 0) { t2 *= t2; n2 = t2 * t2 * (grad3[gi2] * x2 + grad3[gi2 + 1] * y2); }
+          return 70.0 * (n0 + n1 + n2);
+        }
+      };
+    })();
+
+    const resize = () => {
+      width = canvas.width = heroSection.clientWidth;
+      height = canvas.height = heroSection.clientHeight;
+      cols = Math.ceil(width / cellW);
+      rows = Math.ceil(height / cellH);
+    };
+    resize();
+    window.addEventListener('resize', resize, { passive: true });
+
+    let mouseX = width / 2, mouseY = height / 2;
+    let targetMouseX = mouseX, targetMouseY = mouseY;
+    heroSection.addEventListener('mousemove', (e) => {
+      const rect = heroSection.getBoundingClientRect();
+      targetMouseX = e.clientX - rect.left;
+      targetMouseY = e.clientY - rect.top;
+    }, { passive: true });
+
+    let isVisible = true;
+    const observer = new IntersectionObserver(([entry]) => {
+      isVisible = entry.isIntersecting;
+    }, { threshold: 0.05 });
+    observer.observe(heroSection);
+
+    let time = 0;
+    const render = () => {
+      if (isVisible) {
+        time += 0.007;
+        mouseX += (targetMouseX - mouseX) * 0.04;
+        mouseY += (targetMouseY - mouseY) * 0.04;
+
+        ctx.clearRect(0, 0, width, height);
+
+        ctx.font = '11px "JetBrains Mono", system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const mCol = mouseX / cellW;
+        const mRow = mouseY / cellH;
+
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const x = c * cellW;
+            const y = r * cellH;
+
+            const dx = c - mCol;
+            const dy = r - mRow;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const mouseInfluence = Math.exp(-dist * 0.09) * 0.45;
+
+            const nx = c * 0.026 - time * 0.35;
+            const ny = r * 0.028;
+            const qx = SimplexNoise.noise2D(nx + time * 0.25, ny);
+            const qy = SimplexNoise.noise2D(nx, ny + time * 0.25);
+
+            const val = SimplexNoise.noise2D(nx + qx * 0.75 + mouseInfluence, ny + qy * 0.75 + time * 0.18);
+            const norm = (val + 1) * 0.5;
+
+            if (norm > 0.28) {
+              const charIdx = Math.min(CHARS.length - 1, Math.floor(((norm - 0.28) / 0.72) * (CHARS.length - 1)));
+              const ch = CHARS[charIdx];
+              if (ch !== ' ') {
+                const alpha = 0.32 + (charIdx / (CHARS.length - 1)) * 0.68;
+                if (charIdx >= 6) {
+                  ctx.fillStyle = `rgba(255, 115, 145, ${Math.min(1, alpha * 1.15)})`;
+                } else if (charIdx >= 4) {
+                  ctx.fillStyle = `rgba(235, 35, 78, ${alpha * 1.05})`;
+                } else {
+                  ctx.fillStyle = `rgba(195, 25, 62, ${alpha * 0.9})`;
+                }
+                ctx.fillText(ch, x + cellW / 2, y + cellH / 2);
+              }
+            }
+          }
+        }
+      }
+      requestAnimationFrame(render);
+    };
+    render();
+  }
+}
+
+/* ---------- Hero Trendy Cinematic Animation ---------- */
+{
+  const headline = document.getElementById('heroHeadline');
+  const lineOne = document.getElementById('heroLineOne');
+  const lineTwo = document.getElementById('heroLineTwo');
+  const heroDesc = document.querySelector('.hero .lede');
+  const glassDock = document.querySelector('.hero-glass-dock');
+  const heroTag = document.querySelector('.hero-tag');
+
+  if (!reduced) {
+    if (heroTag) gsap.fromTo(heroTag, { opacity: 0, y: -10 }, { opacity: 1, y: 0, duration: 0.5, delay: 0.1, ease: 'power2.out' });
+    if (lineOne) gsap.fromTo(lineOne, { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.65, delay: 0.2, ease: 'power3.out' });
+    if (lineTwo) gsap.fromTo(lineTwo, { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.65, delay: 0.35, ease: 'power3.out' });
+
+    if (heroDesc) gsap.fromTo(heroDesc, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6, delay: 0.45, ease: 'power2.out' });
+    if (glassDock) gsap.fromTo(glassDock, { opacity: 0, y: 18, scale: 0.98 }, { opacity: 1, y: 0, scale: 1, duration: 0.65, delay: 0.55, ease: 'power3.out' });
+  }
 }
 
 // Live GitHub Star Count
