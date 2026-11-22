@@ -15,9 +15,30 @@ import { record, json } from '../_lib/analytics.js';
 
 const MAX_BODY = 2048;
 const ALLOWED = new Set(['view', 'section', 'dwell']);
-const NO_CONTENT = () => new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+const NO_CONTENT = () => new Response(null, {
+  status: 204,
+  headers: {
+    'cache-control': 'no-store',
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'POST, GET, OPTIONS',
+    'access-control-allow-headers': 'Content-Type, Accept'
+  }
+});
 
 export async function onRequest({ request, env }) {
+  if (request.method === 'OPTIONS') {
+    return NO_CONTENT();
+  }
+  if (request.method === 'GET' || request.method === 'HEAD') {
+    return new Response(JSON.stringify({ ok: true, status: 'healthy' }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        'access-control-allow-origin': '*'
+      }
+    });
+  }
   if (request.method !== 'POST') {
     return json({ error: 'Method not allowed.' }, 405, { allow: 'POST' });
   }

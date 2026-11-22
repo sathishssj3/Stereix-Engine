@@ -2219,15 +2219,6 @@ body::-webkit-scrollbar {
     letter-spacing: 0.04em !important;
   }
 }
-
-@media(prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}
-  .rv{opacity:1;transform:none}
-  .ghost::before{display:none!important}
-  .hero-tag b{animation:none!important}
-  .acc details[open] .a{animation:none!important}
-  .card:hover,.flow>div:hover,.legend>div:hover,.btn:hover{transform:none!important}
-}
 </style>
 </head>
 <body>
@@ -2980,7 +2971,7 @@ import ScrollTrigger from 'https://cdn.jsdelivr.net/npm/gsap@3.12.5/ScrollTrigge
 import Lenis from 'https://cdn.jsdelivr.net/npm/lenis@1.1.14/+esm';
 
 gsap.registerPlugin(ScrollTrigger);
-const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reduced = false;
 
 /* Prevent gesture pinch-to-zoom on touch devices */
 document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
@@ -3707,16 +3698,24 @@ document.querySelectorAll('.btn-notify, a[href="#waitForm"], a[href="#waitEmail"
 
     let mouseX = width / 2, mouseY = height / 2;
     let targetMouseX = mouseX, targetMouseY = mouseY;
-    heroSection.addEventListener('mousemove', (e) => {
+    const updatePointer = (clientX, clientY) => {
       const rect = heroSection.getBoundingClientRect();
-      targetMouseX = e.clientX - rect.left;
-      targetMouseY = e.clientY - rect.top;
+      targetMouseX = clientX - rect.left;
+      targetMouseY = clientY - rect.top;
+    };
+    window.addEventListener('mousemove', (e) => {
+      updatePointer(e.clientX, e.clientY);
+    }, { passive: true });
+    window.addEventListener('touchmove', (e) => {
+      if (e.touches && e.touches[0]) {
+        updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+      }
     }, { passive: true });
 
     let isVisible = true;
     const observer = new IntersectionObserver(([entry]) => {
       isVisible = entry.isIntersecting;
-    }, { threshold: 0.05 });
+    }, { threshold: 0.01 });
     observer.observe(heroSection);
 
     let time = 0;
@@ -3786,14 +3785,12 @@ document.querySelectorAll('.btn-notify, a[href="#waitForm"], a[href="#waitEmail"
   const glassDock = document.querySelector('.hero-glass-dock');
   const heroTag = document.querySelector('.hero-tag');
 
-  if (!reduced) {
-    if (heroTag) gsap.fromTo(heroTag, { opacity: 0, y: -10 }, { opacity: 1, y: 0, duration: 0.5, delay: 0.1, ease: 'power2.out' });
-    if (lineOne) gsap.fromTo(lineOne, { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.65, delay: 0.2, ease: 'power3.out' });
-    if (lineTwo) gsap.fromTo(lineTwo, { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.65, delay: 0.35, ease: 'power3.out' });
+  if (heroTag) gsap.fromTo(heroTag, { opacity: 0, y: -12 }, { opacity: 1, y: 0, duration: 0.6, delay: 0.1, ease: 'power2.out' });
+  if (lineOne) gsap.fromTo(lineOne, { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.75, delay: 0.22, ease: 'power3.out' });
+  if (lineTwo) gsap.fromTo(lineTwo, { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.75, delay: 0.38, ease: 'power3.out' });
 
-    if (heroDesc) gsap.fromTo(heroDesc, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6, delay: 0.45, ease: 'power2.out' });
-    if (glassDock) gsap.fromTo(glassDock, { opacity: 0, y: 18, scale: 0.98 }, { opacity: 1, y: 0, scale: 1, duration: 0.65, delay: 0.55, ease: 'power3.out' });
-  }
+  if (heroDesc) gsap.fromTo(heroDesc, { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.7, delay: 0.5, ease: 'power2.out' });
+  if (glassDock) gsap.fromTo(glassDock, { opacity: 0, y: 20, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.75, delay: 0.62, ease: 'power3.out' });
 }
 
 // Live GitHub Star Count
