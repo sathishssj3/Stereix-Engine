@@ -62,10 +62,19 @@
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 
 <script>
-/* Runs before the deferred module, so it beats Chrome's scroll restore.
-   The hero is a scroll-driven animation — a restored position drops
-   returning visitors into the middle of it. */
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+(function armIntroBeforePaint() {
+  try {
+    var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var alreadyPlayed = false;
+    try {
+      alreadyPlayed = sessionStorage.getItem('stereix_intro_played') === '1';
+    } catch (e) {}
+    if (!reduced && !alreadyPlayed) {
+      document.documentElement.classList.add('intro-armed');
+    }
+  } catch (e) {}
+})();
 </script>
 
 <style>
@@ -1969,12 +1978,172 @@ body::-webkit-scrollbar {
   .acc details[open] .a{animation:none!important}
   .card:hover,.flow>div:hover,.legend>div:hover,.btn:hover{transform:none!important}
 }
+
+/* ==================== 3D SPATIAL BACKGROUND CANVAS ==================== */
+.spatial-bg-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.85;
+}
+
+/* ==================== TYPOGRAPHY LOADER & INTRO STATE ==================== */
+html.intro-armed [data-intro-reveal] {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+html.intro-armed .hero-headline {
+  opacity: 0;
+}
+
+body.intro-locking {
+  overflow: hidden !important;
+}
+
+/* Hero Headline */
+.hero-headline {
+  position: relative;
+  font-family: var(--display);
+  font-weight: 700;
+  line-height: 0.94;
+  letter-spacing: -0.035em;
+  text-transform: uppercase;
+  color: var(--white);
+  margin-bottom: 1.85rem;
+  will-change: transform, opacity;
+  user-select: text;
+}
+
+.headline-line {
+  display: block;
+  overflow: hidden;
+  padding: 0.03em 0.02em;
+}
+
+.headline-word {
+  display: inline-block;
+  will-change: transform, opacity;
+}
+
+.headline-word + .headline-word {
+  margin-left: 0.24em;
+}
+
+.headline-char {
+  display: inline-block;
+  will-change: transform, opacity;
+}
+
+/* Restrained crimson accent on terminal period */
+.headline-period {
+  display: inline-block;
+  color: var(--white);
+  transition: color 0.6s ease;
+}
+
+.headline-period.accented {
+  color: var(--red);
+  text-shadow: 0 0 16px rgba(220, 20, 60, 0.7);
+}
+
+/* Hairline accent sweep bar under headline during 1.5s-3.0s emphasis */
+.headline-accent-bar {
+  position: absolute;
+  left: 50%;
+  bottom: -14px;
+  width: min(280px, 60%);
+  height: 2px;
+  transform: translateX(-50%) scaleX(0);
+  transform-origin: center;
+  background: linear-gradient(90deg, transparent 0%, var(--red) 50%, transparent 100%);
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+/* Preview / Replay Dock */
+.preview-dock {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(12, 12, 16, 0.88);
+  border: 1px solid var(--edge);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
+}
+
+.dock-btn {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-family: var(--display);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.dock-btn:hover {
+  background: rgba(220, 20, 60, 0.2);
+  border-color: var(--red);
+  color: #ffffff;
+}
+
+.dock-btn.active {
+  background: var(--red);
+  border-color: var(--red);
+  color: #ffffff;
+}
+
+.dock-timer {
+  padding: 0 4px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+  min-width: 36px;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .preview-dock {
+    left: 10px;
+    bottom: 10px;
+    padding: 4px 8px;
+    transform: scale(0.9);
+    transform-origin: bottom left;
+  }
+}
+
 </style>
 </head>
 <body>
 
+<!-- ============ 3D SPATIAL BACKGROUND CANVAS ============ -->
+<canvas id="spatial3d" class="spatial-bg-canvas" aria-hidden="true"></canvas>
+
+
 <!-- ============ STEREIX PRECISION TELEMETRY CUSTOM SCROLLBAR ============ -->
-<div id="nexvrScrollbar" class="nexvr-telemetry-scrollbar" aria-label="Page Telemetry Navigation">
+<div id="nexvrScrollbar" class="nexvr-telemetry-scrollbar" data-intro-reveal aria-label="Page Telemetry Navigation">
   <div class="nexvr-scroll-track" id="nexvrScrollTrack">
     <div class="nexvr-scroll-rail">
       <div class="nexvr-scroll-fill" id="nexvrScrollFill"></div>
@@ -1989,7 +2158,7 @@ body::-webkit-scrollbar {
     </div>
   </div>
 </div>
-<nav class="nav" id="nav">
+<nav class="nav" id="nav" data-intro-reveal>
   <div class="nav-in">
     <a class="brand" href="#top" aria-label="Stereix Engine — Return to top"><span>STEREIX&nbsp;ENGINE</span></a>
     <ul class="nav-links">
@@ -2033,35 +2202,51 @@ body::-webkit-scrollbar {
   <div class="hero-in">
 
     <div class="hero-copy">
-      <span class="hero-tag"><b>●</b> OpenXR · DX11 · DX12 · Vulkan</span>
+      <span class="hero-tag" id="apiBadge" data-intro-reveal><b>●</b> OpenXR · DX11 · DX12 · Vulkan</span>
 
-      <h1 class="d1">
-        <span class="ghost pre" data-ghost="ONE CLICK."><span>ONE CLICK.</span></span>
-        <span class="ghost pre" data-ghost="ANY GAME IN VR."><span>ANY GAME IN VR.</span></span>
+      <h1 class="d1 hero-headline" id="heroHeadline" aria-label="ONE CLICK. ANY GAME IN VR.">
+        <span class="headline-line" id="lineOne" data-line="1">
+          <span class="headline-word" data-word="ONE">ONE</span>
+          <span class="headline-word" data-word="CLICK.">CLICK<span class="headline-period" data-period="1">.</span></span>
+        </span>
+        <span class="headline-line" id="lineTwo" data-line="2">
+          <span class="headline-word" data-word="ANY">ANY</span>
+          <span class="headline-word" data-word="GAME">GAME</span>
+          <span class="headline-word" data-word="IN">IN</span>
+          <span class="headline-word" data-word="VR.">VR<span class="headline-period accented" data-period="2" data-accent-period="true">.</span></span>
+        </span>
+        <span class="headline-accent-bar" id="headlineAccentBar" aria-hidden="true"></span>
       </h1>
 
-      <p class="lede">
+      <p class="lede" id="heroDescription" data-intro-reveal>
         Play your flat PC games in full 6DOF VR with one click.
         Real-time 3D depth, delivered straight to any OpenXR headset.
       </p>
 
-      <div class="btn-row">
-        <a class="btn btn-primary btn-notify" href="#waitForm"><span>Notify me</span></a>
-        <a class="btn btn-ghost" href="#pipeline"><span>See how it works</span></a>
+      <div class="btn-row" id="heroBtnRow" data-intro-reveal>
+        <a class="btn btn-primary btn-notify" id="heroNotifyBtn" href="#waitForm"><span>Notify me</span></a>
+        <a class="btn btn-ghost" id="heroHowBtn" href="#pipeline"><span>See how it works</span></a>
       </div>
 
       <!-- ============ STAT RAIL ============ -->
-      <div class="rail-bar">
+      <div class="rail-bar" id="heroStats" data-intro-reveal>
         <div class="rail">
-          <div><b class="mono">3</b><span>Graphics APIs</span></div>
-          <div><b class="mono">6</b><span>Shipped profiles</span></div>
-          <div><b class="mono">11.1<small>ms</small></b><span>Frame budget</span></div>
+          <div data-stat-item><b class="mono" data-count-target="3">3</b><span>Graphics APIs</span></div>
+          <div data-stat-item><b class="mono" data-count-target="6">6</b><span>Shipped profiles</span></div>
+          <div data-stat-item><b class="mono" data-count-target="11.1" data-count-decimals="1" data-count-suffix="ms">11.1<small>ms</small></b><span>Frame budget</span></div>
         </div>
       </div>
     </div>
 
   </div>
 </header>
+
+<!-- ============ PREVIEW DOCK (INTRO REPLAY) ============ -->
+<div class="preview-dock" id="previewDock" data-intro-reveal>
+  <button type="button" class="dock-btn" id="replayBtn">Replay Intro</button>
+  <button type="button" class="dock-btn" id="reducedMotionBtn" aria-pressed="false">Reduced Motion: Off</button>
+  <span class="dock-timer" id="dockTimer">0.0s</span>
+</div>
 
 <!-- ============ PIPELINE ============ -->
 <section class="section" id="pipeline">
@@ -2691,6 +2876,672 @@ import Lenis from 'https://cdn.jsdelivr.net/npm/lenis@1.1.14/+esm';
 
 gsap.registerPlugin(ScrollTrigger);
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ============================================================
+   STEREIX ENGINE — 3D SPATIAL BACKGROUND CANVAS
+   ============================================================ */
+{
+  const canvas = document.getElementById('spatial3d');
+  if (canvas) {
+    const ctx = canvas.getContext('2d', { alpha: true });
+    let width = 0;
+    let height = 0;
+    let dpr = 1;
+
+    let rotX = 0;
+    let rotY = 0;
+    let targetRotX = 0;
+    let targetRotY = 0;
+    let scrollCameraZ = 0;
+
+    const NODE_COUNT = 110;
+    const nodes = [];
+    let animId = null;
+    let isVisible = true;
+
+    function resizeCanvas() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    // Seed 3D coordinate space nodes
+    for (let i = 0; i < NODE_COUNT; i++) {
+      nodes.push({
+        x: (Math.random() - 0.5) * 1600,
+        y: (Math.random() - 0.5) * 900,
+        z: Math.random() * 1400 + 100,
+        vx: (Math.random() - 0.5) * 0.35,
+        vy: (Math.random() - 0.5) * 0.35,
+        vz: (Math.random() - 0.5) * 0.45,
+        isAccent: Math.random() < 0.12,
+        phase: Math.random() * Math.PI * 2
+      });
+    }
+
+    function project3D(x, y, z, cx, cy, fov) {
+      // Perspective projection
+      const depth = Math.max(z - scrollCameraZ, 40);
+      const scale = fov / depth;
+      return {
+        px: cx + x * scale,
+        py: cy + y * scale,
+        scale: scale,
+        depth: depth
+      };
+    }
+
+    function render3D(time) {
+      if (!isVisible) return;
+
+      // Inertial smoothing
+      rotX += (targetRotX - rotX) * 0.05;
+      rotY += (targetRotY - rotY) * 0.05;
+
+      ctx.clearRect(0, 0, width, height);
+
+      const cx = width / 2;
+      const cy = height * 0.48;
+      const fov = 480;
+
+      // 1. Receding 3D Ground Grid
+      const groundY = 220;
+      const gridZMin = 150;
+      const gridZMax = 1200;
+      const gridZStep = 90;
+      const gridXRange = 1200;
+      const gridXStep = 100;
+
+      ctx.save();
+      ctx.lineWidth = 1;
+
+      // Transverse grid lines (depth)
+      for (let gz = gridZMin; gz <= gridZMax; gz += gridZStep) {
+        const pLeft = project3D(-gridXRange, groundY, gz, cx, cy, fov);
+        const pRight = project3D(gridXRange, groundY, gz, cx, cy, fov);
+        const alpha = Math.max(0, (1 - (gz / gridZMax)) * 0.14);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.moveTo(pLeft.px, pLeft.py);
+        ctx.lineTo(pRight.px, pRight.py);
+        ctx.stroke();
+      }
+
+      // Longitudinal lines (perspective rays to vanishing point)
+      for (let gx = -gridXRange; gx <= gridXRange; gx += gridXStep) {
+        const isCenter = Math.abs(gx) < 1;
+        const pStart = project3D(gx, groundY, gridZMin, cx, cy, fov);
+        const pEnd = project3D(gx, groundY, gridZMax, cx, cy, fov);
+        if (isCenter) {
+          ctx.strokeStyle = 'rgba(220, 20, 60, 0.38)';
+          ctx.lineWidth = 1.5;
+        } else {
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+          ctx.lineWidth = 1;
+        }
+        ctx.beginPath();
+        ctx.moveTo(pStart.px, pStart.py);
+        ctx.lineTo(pEnd.px, pEnd.py);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // 2. 3D Floating 6DOF Constellation
+      const cosY = Math.cos(rotY);
+      const sinY = Math.sin(rotY);
+      const cosX = Math.cos(rotX);
+      const sinX = Math.sin(rotX);
+
+      const projected = [];
+
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        n.x += n.vx;
+        n.y += n.vy;
+        n.z += n.vz;
+
+        // Wrap boundaries
+        if (n.x < -800) n.x = 800;
+        if (n.x > 800) n.x = -800;
+        if (n.y < -450) n.y = 450;
+        if (n.y > 450) n.y = -450;
+        if (n.z < 100) n.z = 1500;
+        if (n.z > 1500) n.z = 100;
+
+        // Apply interactive 3D rotation
+        let rx = n.x * cosY + n.z * sinY;
+        let rz = -n.x * sinY + n.z * cosY;
+        let ry = n.y * cosX - rz * sinX;
+        rz = n.y * sinX + rz * cosX;
+
+        const proj = project3D(rx, ry, rz, cx, cy, fov);
+        projected.push({
+          node: n,
+          px: proj.px,
+          py: proj.py,
+          scale: proj.scale,
+          depth: proj.depth
+        });
+      }
+
+      // Draw spatial links between proximal nodes
+      ctx.lineWidth = 0.8;
+      for (let i = 0; i < projected.length; i++) {
+        const p1 = projected[i];
+        if (p1.px < -50 || p1.px > width + 50 || p1.py < -50 || p1.py > height + 50) continue;
+
+        for (let j = i + 1; j < projected.length; j++) {
+          const p2 = projected[j];
+          const dx = p1.px - p2.px;
+          const dy = p1.py - p2.py;
+          const distSq = dx * dx + dy * dy;
+          if (distSq < 11000) {
+            const alpha = (1 - Math.sqrt(distSq) / 105) * 0.16 * Math.min(p1.scale, 1.2);
+            if (p1.node.isAccent || p2.node.isAccent) {
+              ctx.strokeStyle = `rgba(220, 20, 60, ${(alpha * 1.6).toFixed(3)})`;
+            } else {
+              ctx.strokeStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
+            }
+            ctx.beginPath();
+            ctx.moveTo(p1.px, p1.py);
+            ctx.lineTo(p2.px, p2.py);
+            ctx.stroke();
+          }
+        }
+      }
+
+      // Draw nodes
+      for (let i = 0; i < projected.length; i++) {
+        const p = projected[i];
+        if (p.px < -20 || p.px > width + 20 || p.py < -20 || p.py > height + 20) continue;
+
+        const radius = Math.max(1, p.scale * 2.8);
+        const baseAlpha = Math.min(1, Math.max(0.15, (1 - p.depth / 1600)));
+
+        ctx.beginPath();
+        ctx.arc(p.px, p.py, radius, 0, Math.PI * 2);
+
+        if (p.node.isAccent) {
+          const pulse = (Math.sin(time * 0.003 + p.node.phase) + 1) * 0.5;
+          ctx.fillStyle = `rgba(220, 20, 60, ${(baseAlpha * (0.6 + pulse * 0.4)).toFixed(2)})`;
+          ctx.shadowColor = 'rgba(220, 20, 60, 0.7)';
+          ctx.shadowBlur = 8;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        } else {
+          ctx.fillStyle = `rgba(240, 240, 245, ${(baseAlpha * 0.65).toFixed(2)})`;
+          ctx.fill();
+        }
+      }
+
+      animId = requestAnimationFrame(render3D);
+    }
+
+    // Parallax pointer tracking
+    window.addEventListener('pointermove', (e) => {
+      const nx = (e.clientX / window.innerWidth - 0.5) * 2;
+      const ny = (e.clientY / window.innerHeight - 0.5) * 2;
+      targetRotY = nx * 0.22;
+      targetRotX = -ny * 0.16;
+    }, { passive: true });
+
+    // Scroll depth reaction
+    window.addEventListener('scroll', () => {
+      scrollCameraZ = (window.scrollY * 0.25) % 1200;
+    }, { passive: true });
+
+    window.addEventListener('resize', resizeCanvas, { passive: true });
+    document.addEventListener('visibilitychange', () => {
+      isVisible = !document.hidden;
+      if (isVisible && !animId) {
+        animId = requestAnimationFrame(render3D);
+      }
+    });
+
+    resizeCanvas();
+    animId = requestAnimationFrame(render3D);
+  }
+}
+
+/* ============================================================
+   STEREIX ENGINE — CINEMATIC TYPOGRAPHY LOADER & INTRO TIMELINE
+   ============================================================ */
+{
+  let activeTimeline = null;
+  let safetyTimer = null;
+  let simulatedReducedMotion = false;
+
+  const headline = document.getElementById('heroHeadline');
+  const lineOne = document.getElementById('lineOne');
+  const lineTwo = document.getElementById('lineTwo');
+  const accentBar = document.getElementById('headlineAccentBar');
+  const accentPeriods = document.querySelectorAll('[data-accent-period]');
+
+  const nav = document.getElementById('nav');
+  const apiBadge = document.getElementById('apiBadge');
+  const heroDescription = document.getElementById('heroDescription');
+  const heroBtnRow = document.getElementById('heroBtnRow');
+  const heroNotifyBtn = document.getElementById('heroNotifyBtn');
+  const heroHowBtn = document.getElementById('heroHowBtn');
+  const heroStats = document.getElementById('heroStats');
+  const statItems = document.querySelectorAll('[data-stat-item]');
+  const nexvrScrollbar = document.getElementById('nexvrScrollbar');
+  const previewDock = document.getElementById('previewDock');
+  const dockTimer = document.getElementById('dockTimer');
+  const replayBtn = document.getElementById('replayBtn');
+  const reducedMotionBtn = document.getElementById('reducedMotionBtn');
+
+  const allRevealEls = document.querySelectorAll('[data-intro-reveal]');
+
+  // Split word into span characters
+  function splitHeadlineChars() {
+    if (!headline) return;
+    const words = headline.querySelectorAll('.headline-word');
+    words.forEach(wordEl => {
+      if (wordEl.dataset.split === '1') return;
+      const frag = document.createDocumentFragment();
+      Array.from(wordEl.childNodes).forEach(node => {
+        if (node.nodeType === 3) {
+          const text = node.textContent;
+          for (let i = 0; i < text.length; i++) {
+            const span = document.createElement('span');
+            span.className = 'headline-char';
+            span.textContent = text[i];
+            frag.appendChild(span);
+          }
+        } else if (node.nodeType === 1) {
+          node.classList.add('headline-char');
+          frag.appendChild(node);
+        }
+      });
+      wordEl.innerHTML = '';
+      wordEl.appendChild(frag);
+      wordEl.dataset.split = '1';
+    });
+  }
+
+  // Exact vertical offset to place headline in center of screen
+  function computeViewportCenterOffset() {
+    if (!headline) return 0;
+    gsap.set(headline, { y: 0, scale: 1 });
+    const rect = headline.getBoundingClientRect();
+    const viewportCenterY = window.innerHeight / 2;
+    const headlineCenterY = rect.top + rect.height / 2;
+    return Math.round(viewportCenterY - headlineCenterY);
+  }
+
+  function revealImmediately() {
+    if (activeTimeline) {
+      activeTimeline.kill();
+      activeTimeline = null;
+    }
+    if (safetyTimer) {
+      clearTimeout(safetyTimer);
+      safetyTimer = null;
+    }
+
+    document.documentElement.classList.remove('intro-armed');
+    document.body.classList.remove('intro-locking');
+
+    allRevealEls.forEach(el => {
+      el.style.opacity = '1';
+      el.style.visibility = 'visible';
+      el.style.pointerEvents = '';
+      el.style.transform = '';
+    });
+
+    if (headline) {
+      headline.style.opacity = '1';
+      headline.style.visibility = 'visible';
+      headline.style.transform = '';
+      headline.querySelectorAll('.headline-char').forEach(ch => {
+        ch.style.opacity = '1';
+        ch.style.transform = '';
+      });
+    }
+
+    if (accentBar) accentBar.style.opacity = '0';
+    accentPeriods.forEach(p => p.classList.remove('accented'));
+
+    // Exact stat values
+    document.querySelectorAll('[data-count-target]').forEach(el => {
+      const target = parseFloat(el.dataset.countTarget);
+      const decimals = parseInt(el.dataset.countDecimals, 10) || 0;
+      const suffix = el.dataset.countSuffix || '';
+      el.textContent = target.toFixed(decimals) + suffix;
+    });
+
+    if (dockTimer) dockTimer.textContent = 'DONE';
+  }
+
+  function runCountUp(el, delaySec) {
+    const target = parseFloat(el.dataset.countTarget);
+    const decimals = parseInt(el.dataset.countDecimals, 10) || 0;
+    const suffix = el.dataset.countSuffix || '';
+    const proxy = { val: 0 };
+    el.textContent = (0).toFixed(decimals) + suffix;
+    gsap.to(proxy, {
+      val: target,
+      duration: 0.75,
+      delay: delaySec,
+      ease: 'power2.out',
+      onUpdate: () => {
+        el.textContent = proxy.val.toFixed(decimals) + suffix;
+      },
+      onComplete: () => {
+        el.textContent = target.toFixed(decimals) + suffix;
+      }
+    });
+  }
+
+  function playCinematicIntro(isReplay) {
+    const prefersReduced = simulatedReducedMotion ||
+      (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+    if (prefersReduced || !headline) {
+      revealImmediately();
+      return;
+    }
+
+    if (activeTimeline) {
+      activeTimeline.kill();
+      activeTimeline = null;
+    }
+    if (safetyTimer) {
+      clearTimeout(safetyTimer);
+      safetyTimer = null;
+    }
+
+    if (isReplay) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
+
+    splitHeadlineChars();
+    document.documentElement.classList.add('intro-armed');
+    document.body.classList.add('intro-locking');
+
+    safetyTimer = setTimeout(revealImmediately, 7500);
+
+    const lineOneChars = lineOne ? lineOne.querySelectorAll('.headline-char') : [];
+    const lineTwoChars = lineTwo ? lineTwo.querySelectorAll('.headline-char') : [];
+    const centerOffsetY = computeViewportCenterOffset();
+
+    // Reset initial hidden state
+    gsap.set(allRevealEls, { autoAlpha: 0, pointerEvents: 'none' });
+    if (nav) gsap.set(nav, { y: -18 });
+    if (apiBadge) gsap.set(apiBadge, { y: 12 });
+    if (heroDescription) gsap.set(heroDescription, { y: 16 });
+    if (heroBtnRow) gsap.set(heroBtnRow, { y: 14 });
+    if (heroStats) gsap.set(heroStats, { y: 16 });
+    if (statItems.length) gsap.set(statItems, { y: 12 });
+    if (nexvrScrollbar) gsap.set(nexvrScrollbar, { autoAlpha: 0 });
+    if (accentBar) gsap.set(accentBar, { opacity: 0, scaleX: 0 });
+    accentPeriods.forEach(p => p.classList.remove('accented'));
+
+    // Center headline in viewport
+    gsap.set(headline, {
+      autoAlpha: 0,
+      y: centerOffsetY,
+      scale: 0.98,
+      transformOrigin: 'center center'
+    });
+    gsap.set(lineOneChars, { yPercent: 110, opacity: 0 });
+    gsap.set(lineTwoChars, { yPercent: 110, opacity: 0 });
+
+    const tl = gsap.timeline({
+      defaults: { ease: 'power3.out' },
+      onUpdate: () => {
+        if (dockTimer) {
+          const t = Math.min(tl.time(), 4.0);
+          dockTimer.textContent = t.toFixed(1) + 's';
+        }
+      },
+      onComplete: () => {
+        if (safetyTimer) {
+          clearTimeout(safetyTimer);
+          safetyTimer = null;
+        }
+        document.documentElement.classList.remove('intro-armed');
+        document.body.classList.remove('intro-locking');
+        allRevealEls.forEach(el => {
+          el.style.pointerEvents = '';
+        });
+        try {
+          sessionStorage.setItem('stereix_intro_played', '1');
+        } catch (e) {}
+        if (dockTimer) dockTimer.textContent = '4.0s';
+      }
+    });
+
+    activeTimeline = tl;
+
+    // 0.0s - 0.5s: Soft fade into viewport center
+    tl.to(headline, {
+      autoAlpha: 1,
+      scale: 1.02,
+      duration: 0.5,
+      ease: 'power2.out'
+    }, 0.08);
+
+    // 0.5s - 1.5s: Staggered character reveal
+    tl.to(lineOneChars, {
+      yPercent: 0,
+      opacity: 1,
+      duration: 0.6,
+      stagger: 0.03,
+      ease: 'power3.out'
+    }, 0.48);
+
+    tl.to(lineTwoChars, {
+      yPercent: 0,
+      opacity: 1,
+      duration: 0.65,
+      stagger: 0.026,
+      ease: 'expo.out'
+    }, 0.82);
+
+    // 1.5s - 2.8s: Emphasis settle & crimson sweep bar & accented period
+    tl.to(headline, {
+      scale: 1.0,
+      duration: 1.25,
+      ease: 'power2.out'
+    }, 1.5);
+
+    tl.call(() => {
+      accentPeriods.forEach(p => p.classList.add('accented'));
+    }, null, 1.7);
+
+    if (accentBar) {
+      tl.to(accentBar, {
+        opacity: 0.85,
+        scaleX: 1,
+        duration: 0.6,
+        ease: 'expo.out'
+      }, 1.7).to(accentBar, {
+        opacity: 0,
+        scaleX: 1.15,
+        duration: 0.5,
+        ease: 'power2.in'
+      }, 2.6);
+    }
+
+    // 2.8s - 3.8s: Glide from center to resting anchor
+    tl.call(() => {
+      accentPeriods.forEach(p => p.classList.remove('accented'));
+    }, null, 3.1);
+
+    tl.to(headline, {
+      y: 0,
+      duration: 0.85,
+      ease: 'power3.inOut'
+    }, 3.05);
+
+    // 3.8s+: Stagger surrounding content
+    if (nav) {
+      tl.to(nav, {
+        autoAlpha: 1,
+        y: 0,
+        duration: 0.55,
+        ease: 'power3.out',
+        onStart: () => { nav.style.pointerEvents = 'auto'; }
+      }, 3.8);
+    }
+
+    if (apiBadge) {
+      tl.to(apiBadge, {
+        autoAlpha: 1,
+        y: 0,
+        duration: 0.48,
+        ease: 'power3.out',
+        onStart: () => { apiBadge.style.pointerEvents = 'auto'; }
+      }, 3.95);
+    }
+
+    if (heroDescription) {
+      tl.to(heroDescription, {
+        autoAlpha: 1,
+        y: 0,
+        duration: 0.52,
+        ease: 'power3.out',
+        onStart: () => { heroDescription.style.pointerEvents = 'auto'; }
+      }, 4.08);
+    }
+
+    if (heroBtnRow) {
+      tl.to(heroBtnRow, {
+        autoAlpha: 1,
+        y: 0,
+        duration: 0.48,
+        ease: 'power3.out',
+        onStart: () => { heroBtnRow.style.pointerEvents = 'auto'; }
+      }, 4.22);
+    }
+
+    if (heroStats) {
+      tl.to(heroStats, {
+        autoAlpha: 1,
+        y: 0,
+        duration: 0.5,
+        ease: 'power3.out',
+        onStart: () => { heroStats.style.pointerEvents = 'auto'; }
+      }, 4.36);
+    }
+
+    if (statItems.length) {
+      tl.to(statItems, {
+        autoAlpha: 1,
+        y: 0,
+        duration: 0.45,
+        stagger: 0.08,
+        ease: 'power3.out',
+        onStart: () => {
+          statItems.forEach((item, idx) => {
+            item.style.pointerEvents = 'auto';
+            const valueEl = item.querySelector('[data-count-target]');
+            if (valueEl) runCountUp(valueEl, idx * 0.08);
+          });
+        }
+      }, 4.4);
+    }
+
+    if (nexvrScrollbar) {
+      tl.to(nexvrScrollbar, {
+        autoAlpha: 1,
+        duration: 0.6,
+        ease: 'power2.out',
+        onStart: () => { nexvrScrollbar.style.pointerEvents = 'auto'; }
+      }, 4.5);
+    }
+
+    if (previewDock) {
+      tl.to(previewDock, {
+        autoAlpha: 1,
+        duration: 0.5,
+        ease: 'power2.out',
+        onStart: () => { previewDock.style.pointerEvents = 'auto'; }
+      }, 4.55);
+    }
+  }
+
+  // Bind replay controls
+  if (replayBtn) {
+    replayBtn.addEventListener('click', () => playCinematicIntro(true));
+  }
+  if (reducedMotionBtn) {
+    reducedMotionBtn.addEventListener('click', () => {
+      simulatedReducedMotion = !simulatedReducedMotion;
+      reducedMotionBtn.classList.toggle('active', simulatedReducedMotion);
+      reducedMotionBtn.setAttribute('aria-pressed', String(simulatedReducedMotion));
+      reducedMotionBtn.textContent = simulatedReducedMotion
+        ? 'Reduced Motion: On'
+        : 'Reduced Motion: Off';
+      playCinematicIntro(true);
+    });
+  }
+
+  // Boot on page load
+  let alreadyPlayed = false;
+  try {
+    alreadyPlayed = sessionStorage.getItem('stereix_intro_played') === '1';
+  } catch (e) {}
+
+  if (alreadyPlayed) {
+    revealImmediately();
+  } else {
+    playCinematicIntro(false);
+  }
+}
+
+/* ============================================================
+   STEREIX ENGINE — ENHANCED SCROLLTRIGGER SCROLLING ANIMATIONS
+   ============================================================ */
+{
+  if (!reduced) {
+    // Stagger in section cards
+    const cardSections = ['#gameGrid', '.spec-grid', '.legend'];
+    cardSections.forEach(sel => {
+      const el = document.querySelector(sel);
+      if (el) {
+        const children = el.children;
+        if (children.length) {
+          gsap.fromTo(children, 
+            { y: 28, opacity: 0 },
+            {
+              y: 0,
+              opacity: 1,
+              duration: 0.65,
+              stagger: 0.08,
+              ease: 'power3.out',
+              scrollTrigger: {
+                trigger: el,
+                start: 'top 82%',
+                toggleActions: 'play none none none'
+              }
+            }
+          );
+        }
+      }
+    });
+
+    // Parallax subtle elevation on pipeline cards
+    document.querySelectorAll('.pipe .budget').forEach(b => {
+      gsap.to(b, {
+        y: 20,
+        ease: 'none',
+        scrollTrigger: {
+          trigger: b,
+          start: 'top bottom',
+          end: 'bottom top',
+          scrub: true
+        }
+      });
+    });
+  }
+}
+
 
 /* Prevent gesture pinch-to-zoom on touch devices */
 document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
