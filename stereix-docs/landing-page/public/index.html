@@ -6,14 +6,15 @@
 <title>Stereix Engine — One Click. Any Game in VR. | Mesmeran Lab</title>
 <meta name="description" content="Universal VR injector. Hooks DirectX 11, DirectX 12 and Vulkan, and submits stereo frames straight to OpenXR. Play the games you already own in your headset.">
 <meta name="keywords" content="VR Injector, OpenXR, PCVR, DirectX 11, DirectX 12, Vulkan, Meta Quest 3, SteamVR, PSVR2, 6DOF, Stereo 3D">
-<meta name="theme-color" content="#050506">
+<meta name="theme-color" content="#141418">
 <link rel="canonical" href="https://stereix-engine.pages.dev/">
 
 <!-- Stereix Engine Brand Logo -->
-<link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png?v=3">
-<link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png?v=3">
-<link rel="shortcut icon" type="image/x-icon" href="favicon.ico?v=3">
-<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=3">
+<link rel="icon" type="image/png" sizes="256x256" href="stereix-icon.png?v=4">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png?v=4">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png?v=4">
+<link rel="shortcut icon" type="image/x-icon" href="favicon.ico?v=4">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=4">
 
 <!-- OpenGraph / Social Graph -->
 <meta property="og:site_name" content="Stereix Engine">
@@ -66,11 +67,7 @@ if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 (function armIntroBeforePaint() {
   try {
     var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    var alreadyPlayed = false;
-    try {
-      alreadyPlayed = sessionStorage.getItem('stereix_intro_played') === '1';
-    } catch (e) {}
-    if (!reduced && !alreadyPlayed) {
+    if (!reduced) {
       document.documentElement.classList.add('intro-armed');
     }
   } catch (e) {}
@@ -86,15 +83,15 @@ if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
    ============================================================ */
 
 :root{
-  --void:#050506;
-  --panel:#0C0C0F;
-  --panel-2:#101014;
+  --void:#141418;
+  --panel:#1B1B22;
+  --panel-2:#22222A;
   --edge:rgba(255,255,255,.08);
   --edge-hot:rgba(220, 20, 60,.34);
   --red:#DC143C;
   --red-deep:#8B0021;
   --white:#F2F2F3;
-  --muted:#8E8E96;
+  --muted:#9E9EA8;
   --dim:#5C5C64;
 
   --display:'Chakra Petch',system-ui,sans-serif;
@@ -112,7 +109,13 @@ if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 *,*::before,*::after{box-sizing:border-box}
 html{scroll-behavior:auto;-webkit-text-size-adjust:100%;touch-action:manipulation;overflow-x:hidden;width:100%;max-width:100vw}
 body{
-  margin:0;background:var(--void);color:var(--white);
+  margin:0;
+  background-color:#141418;
+  background-image:
+    radial-gradient(ellipse 85% 55% at 50% -12%, rgba(60, 62, 74, 0.35) 0%, transparent 70%),
+    radial-gradient(ellipse 70% 45% at 50% 115%, rgba(42, 44, 54, 0.42) 0%, transparent 70%);
+  background-attachment:fixed;
+  color:var(--white);
   font-family:var(--body);font-size:1.0625rem;line-height:1.65;
   -webkit-font-smoothing:antialiased;overflow-x:hidden;width:100%;max-width:100vw;
   touch-action:manipulation;
@@ -199,7 +202,7 @@ code{font-family:var(--mono)}
   margin-inline:auto;
   padding-inline:1.5rem;
   border-radius:10px;
-  background:rgba(8, 8, 11, 0.78);
+  background:rgba(22, 23, 29, 0.85);
   backdrop-filter:blur(24px) saturate(140%);
   -webkit-backdrop-filter:blur(24px) saturate(140%);
   border:1px solid rgba(255, 255, 255, 0.08);
@@ -207,7 +210,7 @@ code{font-family:var(--mono)}
   transition:all .3s var(--ease);
 }
 .nav.stuck .nav-in{
-  background:rgba(6, 6, 8, 0.92);
+  background:rgba(18, 19, 24, 0.94);
   border-color:rgba(255, 255, 255, 0.14);
   box-shadow:0 16px 40px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   transform:translateY(-2px);
@@ -1978,172 +1981,12 @@ body::-webkit-scrollbar {
   .acc details[open] .a{animation:none!important}
   .card:hover,.flow>div:hover,.legend>div:hover,.btn:hover{transform:none!important}
 }
-
-/* ==================== 3D SPATIAL BACKGROUND CANVAS ==================== */
-.spatial-bg-canvas {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.85;
-}
-
-/* ==================== TYPOGRAPHY LOADER & INTRO STATE ==================== */
-html.intro-armed [data-intro-reveal] {
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-}
-
-html.intro-armed .hero-headline {
-  opacity: 0;
-}
-
-body.intro-locking {
-  overflow: hidden !important;
-}
-
-/* Hero Headline */
-.hero-headline {
-  position: relative;
-  font-family: var(--display);
-  font-weight: 700;
-  line-height: 0.94;
-  letter-spacing: -0.035em;
-  text-transform: uppercase;
-  color: var(--white);
-  margin-bottom: 1.85rem;
-  will-change: transform, opacity;
-  user-select: text;
-}
-
-.headline-line {
-  display: block;
-  overflow: hidden;
-  padding: 0.03em 0.02em;
-}
-
-.headline-word {
-  display: inline-block;
-  will-change: transform, opacity;
-}
-
-.headline-word + .headline-word {
-  margin-left: 0.24em;
-}
-
-.headline-char {
-  display: inline-block;
-  will-change: transform, opacity;
-}
-
-/* Restrained crimson accent on terminal period */
-.headline-period {
-  display: inline-block;
-  color: var(--white);
-  transition: color 0.6s ease;
-}
-
-.headline-period.accented {
-  color: var(--red);
-  text-shadow: 0 0 16px rgba(220, 20, 60, 0.7);
-}
-
-/* Hairline accent sweep bar under headline during 1.5s-3.0s emphasis */
-.headline-accent-bar {
-  position: absolute;
-  left: 50%;
-  bottom: -14px;
-  width: min(280px, 60%);
-  height: 2px;
-  transform: translateX(-50%) scaleX(0);
-  transform-origin: center;
-  background: linear-gradient(90deg, transparent 0%, var(--red) 50%, transparent 100%);
-  opacity: 0;
-  pointer-events: none;
-  will-change: transform, opacity;
-}
-
-/* Preview / Replay Dock */
-.preview-dock {
-  position: fixed;
-  left: 18px;
-  bottom: 18px;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: rgba(12, 12, 16, 0.88);
-  border: 1px solid var(--edge);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  color: var(--muted);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
-}
-
-.dock-btn {
-  background: rgba(255, 255, 255, 0.06);
-  color: #ffffff;
-  border: 1px solid var(--edge);
-  border-radius: 4px;
-  padding: 5px 10px;
-  font-family: var(--display);
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
-}
-
-.dock-btn:hover {
-  background: rgba(220, 20, 60, 0.2);
-  border-color: var(--red);
-  color: #ffffff;
-}
-
-.dock-btn.active {
-  background: var(--red);
-  border-color: var(--red);
-  color: #ffffff;
-}
-
-.dock-timer {
-  padding: 0 4px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  font-family: var(--mono);
-  min-width: 36px;
-  text-align: center;
-}
-
-@media (max-width: 640px) {
-  .preview-dock {
-    left: 10px;
-    bottom: 10px;
-    padding: 4px 8px;
-    transform: scale(0.9);
-    transform-origin: bottom left;
-  }
-}
-
 </style>
 </head>
 <body>
 
-<!-- ============ 3D SPATIAL BACKGROUND CANVAS ============ -->
-<canvas id="spatial3d" class="spatial-bg-canvas" aria-hidden="true"></canvas>
-
-
 <!-- ============ STEREIX PRECISION TELEMETRY CUSTOM SCROLLBAR ============ -->
-<div id="nexvrScrollbar" class="nexvr-telemetry-scrollbar" data-intro-reveal aria-label="Page Telemetry Navigation">
+<div id="nexvrScrollbar" class="nexvr-telemetry-scrollbar" aria-label="Page Telemetry Navigation">
   <div class="nexvr-scroll-track" id="nexvrScrollTrack">
     <div class="nexvr-scroll-rail">
       <div class="nexvr-scroll-fill" id="nexvrScrollFill"></div>
@@ -2160,7 +2003,7 @@ body.intro-locking {
 </div>
 <nav class="nav" id="nav" data-intro-reveal>
   <div class="nav-in">
-    <a class="brand" href="#top" aria-label="Stereix Engine — Return to top"><span>STEREIX&nbsp;ENGINE</span></a>
+    <a class="brand" href="#top" aria-label="Stereix Engine — Return to top"><img src="stereix-icon.png?v=4" alt="Stereix" width="24" height="24" style="border-radius:6px;object-fit:contain;flex-shrink:0;"><span>STEREIX&nbsp;ENGINE</span></a>
     <ul class="nav-links">
       <li><a href="#pipeline">Pipeline</a></li>
       <li><a href="#backends">Backends</a></li>
@@ -2199,6 +2042,7 @@ body.intro-locking {
 
 <!-- ============ HERO ============ -->
 <header class="hero" id="top">
+  <div class="hero-ambient" id="heroAmbient" aria-hidden="true"></div>
   <div class="hero-in">
 
     <div class="hero-copy">
@@ -2240,13 +2084,6 @@ body.intro-locking {
 
   </div>
 </header>
-
-<!-- ============ PREVIEW DOCK (INTRO REPLAY) ============ -->
-<div class="preview-dock" id="previewDock" data-intro-reveal>
-  <button type="button" class="dock-btn" id="replayBtn">Replay Intro</button>
-  <button type="button" class="dock-btn" id="reducedMotionBtn" aria-pressed="false">Reduced Motion: Off</button>
-  <span class="dock-timer" id="dockTimer">0.0s</span>
-</div>
 
 <!-- ============ PIPELINE ============ -->
 <section class="section" id="pipeline">
@@ -2782,7 +2619,7 @@ body.intro-locking {
     <div class="foot-grid">
       <div>
         <a class="brand" href="#top" aria-label="Stereix Engine — Return to top" style="margin-bottom:1.1rem;display:inline-flex;align-items:center;gap:0.5rem">
-          <img src="stereix_blades_crimson.png" alt="" width="20" height="20" style="object-fit:contain">
+          <img src="stereix-icon.png?v=4" alt="" width="22" height="22" style="border-radius:5px;object-fit:contain">
           <span>STEREIX&nbsp;ENGINE</span>
         </a>
         <p class="small" style="margin:0;max-width:32ch">
@@ -2828,7 +2665,7 @@ body.intro-locking {
     <!-- Monumental Brand Lockup (Wispr Flow style) -->
     <div class="foot-billboard-wrap">
       <a href="#top" class="foot-billboard" aria-label="Stereix Engine — Return to top">
-        <img class="foot-billboard-mark" src="stereix_blades_crimson.png" alt="Stereix Logo" width="512" height="512" loading="lazy">
+        <img class="foot-billboard-mark" src="stereix-icon.png?v=4" alt="Stereix Logo" width="512" height="512" loading="lazy" style="border-radius:80px;box-shadow:0 0 35px rgba(220, 20, 60, 0.25)">
         <div class="foot-billboard-text">
           <span>STEREIX</span>
           <span class="foot-billboard-suffix">ENGINE</span>
@@ -2878,247 +2715,18 @@ gsap.registerPlugin(ScrollTrigger);
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ============================================================
-   STEREIX ENGINE — 3D SPATIAL BACKGROUND CANVAS
-   ============================================================ */
-{
-  const canvas = document.getElementById('spatial3d');
-  if (canvas) {
-    const ctx = canvas.getContext('2d', { alpha: true });
-    let width = 0;
-    let height = 0;
-    let dpr = 1;
-
-    let rotX = 0;
-    let rotY = 0;
-    let targetRotX = 0;
-    let targetRotY = 0;
-    let scrollCameraZ = 0;
-
-    const NODE_COUNT = 110;
-    const nodes = [];
-    let animId = null;
-    let isVisible = true;
-
-    function resizeCanvas() {
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
-      width = window.innerWidth;
-      height = window.innerHeight;
-      canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-
-    // Seed 3D coordinate space nodes
-    for (let i = 0; i < NODE_COUNT; i++) {
-      nodes.push({
-        x: (Math.random() - 0.5) * 1600,
-        y: (Math.random() - 0.5) * 900,
-        z: Math.random() * 1400 + 100,
-        vx: (Math.random() - 0.5) * 0.35,
-        vy: (Math.random() - 0.5) * 0.35,
-        vz: (Math.random() - 0.5) * 0.45,
-        isAccent: Math.random() < 0.12,
-        phase: Math.random() * Math.PI * 2
-      });
-    }
-
-    function project3D(x, y, z, cx, cy, fov) {
-      // Perspective projection
-      const depth = Math.max(z - scrollCameraZ, 40);
-      const scale = fov / depth;
-      return {
-        px: cx + x * scale,
-        py: cy + y * scale,
-        scale: scale,
-        depth: depth
-      };
-    }
-
-    function render3D(time) {
-      if (!isVisible) return;
-
-      // Inertial smoothing
-      rotX += (targetRotX - rotX) * 0.05;
-      rotY += (targetRotY - rotY) * 0.05;
-
-      ctx.clearRect(0, 0, width, height);
-
-      const cx = width / 2;
-      const cy = height * 0.48;
-      const fov = 480;
-
-      // 1. Receding 3D Ground Grid
-      const groundY = 220;
-      const gridZMin = 150;
-      const gridZMax = 1200;
-      const gridZStep = 90;
-      const gridXRange = 1200;
-      const gridXStep = 100;
-
-      ctx.save();
-      ctx.lineWidth = 1;
-
-      // Transverse grid lines (depth)
-      for (let gz = gridZMin; gz <= gridZMax; gz += gridZStep) {
-        const pLeft = project3D(-gridXRange, groundY, gz, cx, cy, fov);
-        const pRight = project3D(gridXRange, groundY, gz, cx, cy, fov);
-        const alpha = Math.max(0, (1 - (gz / gridZMax)) * 0.14);
-        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
-        ctx.beginPath();
-        ctx.moveTo(pLeft.px, pLeft.py);
-        ctx.lineTo(pRight.px, pRight.py);
-        ctx.stroke();
-      }
-
-      // Longitudinal lines (perspective rays to vanishing point)
-      for (let gx = -gridXRange; gx <= gridXRange; gx += gridXStep) {
-        const isCenter = Math.abs(gx) < 1;
-        const pStart = project3D(gx, groundY, gridZMin, cx, cy, fov);
-        const pEnd = project3D(gx, groundY, gridZMax, cx, cy, fov);
-        if (isCenter) {
-          ctx.strokeStyle = 'rgba(220, 20, 60, 0.38)';
-          ctx.lineWidth = 1.5;
-        } else {
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-          ctx.lineWidth = 1;
-        }
-        ctx.beginPath();
-        ctx.moveTo(pStart.px, pStart.py);
-        ctx.lineTo(pEnd.px, pEnd.py);
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      // 2. 3D Floating 6DOF Constellation
-      const cosY = Math.cos(rotY);
-      const sinY = Math.sin(rotY);
-      const cosX = Math.cos(rotX);
-      const sinX = Math.sin(rotX);
-
-      const projected = [];
-
-      for (let i = 0; i < nodes.length; i++) {
-        const n = nodes[i];
-        n.x += n.vx;
-        n.y += n.vy;
-        n.z += n.vz;
-
-        // Wrap boundaries
-        if (n.x < -800) n.x = 800;
-        if (n.x > 800) n.x = -800;
-        if (n.y < -450) n.y = 450;
-        if (n.y > 450) n.y = -450;
-        if (n.z < 100) n.z = 1500;
-        if (n.z > 1500) n.z = 100;
-
-        // Apply interactive 3D rotation
-        let rx = n.x * cosY + n.z * sinY;
-        let rz = -n.x * sinY + n.z * cosY;
-        let ry = n.y * cosX - rz * sinX;
-        rz = n.y * sinX + rz * cosX;
-
-        const proj = project3D(rx, ry, rz, cx, cy, fov);
-        projected.push({
-          node: n,
-          px: proj.px,
-          py: proj.py,
-          scale: proj.scale,
-          depth: proj.depth
-        });
-      }
-
-      // Draw spatial links between proximal nodes
-      ctx.lineWidth = 0.8;
-      for (let i = 0; i < projected.length; i++) {
-        const p1 = projected[i];
-        if (p1.px < -50 || p1.px > width + 50 || p1.py < -50 || p1.py > height + 50) continue;
-
-        for (let j = i + 1; j < projected.length; j++) {
-          const p2 = projected[j];
-          const dx = p1.px - p2.px;
-          const dy = p1.py - p2.py;
-          const distSq = dx * dx + dy * dy;
-          if (distSq < 11000) {
-            const alpha = (1 - Math.sqrt(distSq) / 105) * 0.16 * Math.min(p1.scale, 1.2);
-            if (p1.node.isAccent || p2.node.isAccent) {
-              ctx.strokeStyle = `rgba(220, 20, 60, ${(alpha * 1.6).toFixed(3)})`;
-            } else {
-              ctx.strokeStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
-            }
-            ctx.beginPath();
-            ctx.moveTo(p1.px, p1.py);
-            ctx.lineTo(p2.px, p2.py);
-            ctx.stroke();
-          }
-        }
-      }
-
-      // Draw nodes
-      for (let i = 0; i < projected.length; i++) {
-        const p = projected[i];
-        if (p.px < -20 || p.px > width + 20 || p.py < -20 || p.py > height + 20) continue;
-
-        const radius = Math.max(1, p.scale * 2.8);
-        const baseAlpha = Math.min(1, Math.max(0.15, (1 - p.depth / 1600)));
-
-        ctx.beginPath();
-        ctx.arc(p.px, p.py, radius, 0, Math.PI * 2);
-
-        if (p.node.isAccent) {
-          const pulse = (Math.sin(time * 0.003 + p.node.phase) + 1) * 0.5;
-          ctx.fillStyle = `rgba(220, 20, 60, ${(baseAlpha * (0.6 + pulse * 0.4)).toFixed(2)})`;
-          ctx.shadowColor = 'rgba(220, 20, 60, 0.7)';
-          ctx.shadowBlur = 8;
-          ctx.fill();
-          ctx.shadowBlur = 0;
-        } else {
-          ctx.fillStyle = `rgba(240, 240, 245, ${(baseAlpha * 0.65).toFixed(2)})`;
-          ctx.fill();
-        }
-      }
-
-      animId = requestAnimationFrame(render3D);
-    }
-
-    // Parallax pointer tracking
-    window.addEventListener('pointermove', (e) => {
-      const nx = (e.clientX / window.innerWidth - 0.5) * 2;
-      const ny = (e.clientY / window.innerHeight - 0.5) * 2;
-      targetRotY = nx * 0.22;
-      targetRotX = -ny * 0.16;
-    }, { passive: true });
-
-    // Scroll depth reaction
-    window.addEventListener('scroll', () => {
-      scrollCameraZ = (window.scrollY * 0.25) % 1200;
-    }, { passive: true });
-
-    window.addEventListener('resize', resizeCanvas, { passive: true });
-    document.addEventListener('visibilitychange', () => {
-      isVisible = !document.hidden;
-      if (isVisible && !animId) {
-        animId = requestAnimationFrame(render3D);
-      }
-    });
-
-    resizeCanvas();
-    animId = requestAnimationFrame(render3D);
-  }
-}
-
-/* ============================================================
    STEREIX ENGINE — CINEMATIC TYPOGRAPHY LOADER & INTRO TIMELINE
    ============================================================ */
 {
   let activeTimeline = null;
   let safetyTimer = null;
-  let simulatedReducedMotion = false;
 
   const headline = document.getElementById('heroHeadline');
   const lineOne = document.getElementById('lineOne');
   const lineTwo = document.getElementById('lineTwo');
   const accentBar = document.getElementById('headlineAccentBar');
   const accentPeriods = document.querySelectorAll('[data-accent-period]');
+  const heroAmbient = document.getElementById('heroAmbient');
 
   const nav = document.getElementById('nav');
   const apiBadge = document.getElementById('apiBadge');
@@ -3129,14 +2737,10 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const heroStats = document.getElementById('heroStats');
   const statItems = document.querySelectorAll('[data-stat-item]');
   const nexvrScrollbar = document.getElementById('nexvrScrollbar');
-  const previewDock = document.getElementById('previewDock');
-  const dockTimer = document.getElementById('dockTimer');
-  const replayBtn = document.getElementById('replayBtn');
-  const reducedMotionBtn = document.getElementById('reducedMotionBtn');
 
   const allRevealEls = document.querySelectorAll('[data-intro-reveal]');
 
-  // Split word into span characters
+  // Split each word into character spans
   function splitHeadlineChars() {
     if (!headline) return;
     const words = headline.querySelectorAll('.headline-word');
@@ -3205,16 +2809,15 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     if (accentBar) accentBar.style.opacity = '0';
     accentPeriods.forEach(p => p.classList.remove('accented'));
+    if (heroAmbient) heroAmbient.style.opacity = '0.35';
 
-    // Exact stat values
+    // Set exact stat values
     document.querySelectorAll('[data-count-target]').forEach(el => {
       const target = parseFloat(el.dataset.countTarget);
       const decimals = parseInt(el.dataset.countDecimals, 10) || 0;
       const suffix = el.dataset.countSuffix || '';
       el.textContent = target.toFixed(decimals) + suffix;
     });
-
-    if (dockTimer) dockTimer.textContent = 'DONE';
   }
 
   function runCountUp(el, delaySec) {
@@ -3237,11 +2840,8 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     });
   }
 
-  function playCinematicIntro(isReplay) {
-    const prefersReduced = simulatedReducedMotion ||
-      (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-
-    if (prefersReduced || !headline) {
+  function playCinematicIntro() {
+    if (reduced || !headline) {
       revealImmediately();
       return;
     }
@@ -3255,21 +2855,17 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
       safetyTimer = null;
     }
 
-    if (isReplay) {
-      window.scrollTo({ top: 0, behavior: 'instant' });
-    }
-
     splitHeadlineChars();
     document.documentElement.classList.add('intro-armed');
     document.body.classList.add('intro-locking');
 
-    safetyTimer = setTimeout(revealImmediately, 7500);
+    safetyTimer = setTimeout(revealImmediately, 7000);
 
     const lineOneChars = lineOne ? lineOne.querySelectorAll('.headline-char') : [];
     const lineTwoChars = lineTwo ? lineTwo.querySelectorAll('.headline-char') : [];
     const centerOffsetY = computeViewportCenterOffset();
 
-    // Reset initial hidden state
+    // Reset initial hidden state via GPU-accelerated transforms
     gsap.set(allRevealEls, { autoAlpha: 0, pointerEvents: 'none' });
     if (nav) gsap.set(nav, { y: -18 });
     if (apiBadge) gsap.set(apiBadge, { y: 12 });
@@ -3278,10 +2874,11 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (heroStats) gsap.set(heroStats, { y: 16 });
     if (statItems.length) gsap.set(statItems, { y: 12 });
     if (nexvrScrollbar) gsap.set(nexvrScrollbar, { autoAlpha: 0 });
+    if (heroAmbient) gsap.set(heroAmbient, { opacity: 0, scale: 0.92 });
     if (accentBar) gsap.set(accentBar, { opacity: 0, scaleX: 0 });
     accentPeriods.forEach(p => p.classList.remove('accented'));
 
-    // Center headline in viewport
+    // Position headline centered in viewport
     gsap.set(headline, {
       autoAlpha: 0,
       y: centerOffsetY,
@@ -3293,12 +2890,6 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const tl = gsap.timeline({
       defaults: { ease: 'power3.out' },
-      onUpdate: () => {
-        if (dockTimer) {
-          const t = Math.min(tl.time(), 4.0);
-          dockTimer.textContent = t.toFixed(1) + 's';
-        }
-      },
       onComplete: () => {
         if (safetyTimer) {
           clearTimeout(safetyTimer);
@@ -3309,10 +2900,6 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
         allRevealEls.forEach(el => {
           el.style.pointerEvents = '';
         });
-        try {
-          sessionStorage.setItem('stereix_intro_played', '1');
-        } catch (e) {}
-        if (dockTimer) dockTimer.textContent = '4.0s';
       }
     });
 
@@ -3326,7 +2913,7 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
       ease: 'power2.out'
     }, 0.08);
 
-    // 0.5s - 1.5s: Staggered character reveal
+    // 0.5s - 1.5s: Staggered character reveal (ONE CLICK. first, then ANY GAME IN VR.)
     tl.to(lineOneChars, {
       yPercent: 0,
       opacity: 1,
@@ -3343,12 +2930,21 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
       ease: 'expo.out'
     }, 0.82);
 
-    // 1.5s - 2.8s: Emphasis settle & crimson sweep bar & accented period
+    // 1.5s - 2.8s: Emphasis settle + crimson period pulse + laser accent sweep bar
     tl.to(headline, {
       scale: 1.0,
       duration: 1.25,
       ease: 'power2.out'
     }, 1.5);
+
+    if (heroAmbient) {
+      tl.to(heroAmbient, {
+        opacity: 0.85,
+        scale: 1,
+        duration: 0.9,
+        ease: 'power2.out'
+      }, 1.55);
+    }
 
     tl.call(() => {
       accentPeriods.forEach(p => p.classList.add('accented'));
@@ -3365,21 +2961,29 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
         scaleX: 1.15,
         duration: 0.5,
         ease: 'power2.in'
-      }, 2.6);
+      }, 2.55);
     }
 
-    // 2.8s - 3.8s: Glide from center to resting anchor
+    // 2.8s - 3.7s: Headline glides smoothly from center to resting anchor position
+    if (heroAmbient) {
+      tl.to(heroAmbient, {
+        opacity: 0.35,
+        duration: 0.85,
+        ease: 'power2.inOut'
+      }, 2.95);
+    }
+
     tl.call(() => {
       accentPeriods.forEach(p => p.classList.remove('accented'));
-    }, null, 3.1);
+    }, null, 3.0);
 
     tl.to(headline, {
       y: 0,
       duration: 0.85,
       ease: 'power3.inOut'
-    }, 3.05);
+    }, 2.95);
 
-    // 3.8s+: Stagger surrounding content
+    // 3.6s+: Cascade UI content into place
     if (nav) {
       tl.to(nav, {
         autoAlpha: 1,
@@ -3387,7 +2991,7 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
         duration: 0.55,
         ease: 'power3.out',
         onStart: () => { nav.style.pointerEvents = 'auto'; }
-      }, 3.8);
+      }, 3.6);
     }
 
     if (apiBadge) {
@@ -3397,7 +3001,7 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
         duration: 0.48,
         ease: 'power3.out',
         onStart: () => { apiBadge.style.pointerEvents = 'auto'; }
-      }, 3.95);
+      }, 3.75);
     }
 
     if (heroDescription) {
@@ -3407,7 +3011,7 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
         duration: 0.52,
         ease: 'power3.out',
         onStart: () => { heroDescription.style.pointerEvents = 'auto'; }
-      }, 4.08);
+      }, 3.88);
     }
 
     if (heroBtnRow) {
@@ -3417,7 +3021,7 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
         duration: 0.48,
         ease: 'power3.out',
         onStart: () => { heroBtnRow.style.pointerEvents = 'auto'; }
-      }, 4.22);
+      }, 4.02);
     }
 
     if (heroStats) {
@@ -3427,7 +3031,7 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
         duration: 0.5,
         ease: 'power3.out',
         onStart: () => { heroStats.style.pointerEvents = 'auto'; }
-      }, 4.36);
+      }, 4.15);
     }
 
     if (statItems.length) {
@@ -3444,7 +3048,7 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
             if (valueEl) runCountUp(valueEl, idx * 0.08);
           });
         }
-      }, 4.4);
+      }, 4.2);
     }
 
     if (nexvrScrollbar) {
@@ -3453,45 +3057,15 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
         duration: 0.6,
         ease: 'power2.out',
         onStart: () => { nexvrScrollbar.style.pointerEvents = 'auto'; }
-      }, 4.5);
-    }
-
-    if (previewDock) {
-      tl.to(previewDock, {
-        autoAlpha: 1,
-        duration: 0.5,
-        ease: 'power2.out',
-        onStart: () => { previewDock.style.pointerEvents = 'auto'; }
-      }, 4.55);
+      }, 4.3);
     }
   }
 
-  // Bind replay controls
-  if (replayBtn) {
-    replayBtn.addEventListener('click', () => playCinematicIntro(true));
-  }
-  if (reducedMotionBtn) {
-    reducedMotionBtn.addEventListener('click', () => {
-      simulatedReducedMotion = !simulatedReducedMotion;
-      reducedMotionBtn.classList.toggle('active', simulatedReducedMotion);
-      reducedMotionBtn.setAttribute('aria-pressed', String(simulatedReducedMotion));
-      reducedMotionBtn.textContent = simulatedReducedMotion
-        ? 'Reduced Motion: On'
-        : 'Reduced Motion: Off';
-      playCinematicIntro(true);
-    });
-  }
-
-  // Boot on page load
-  let alreadyPlayed = false;
-  try {
-    alreadyPlayed = sessionStorage.getItem('stereix_intro_played') === '1';
-  } catch (e) {}
-
-  if (alreadyPlayed) {
-    revealImmediately();
+  // Trigger intro on every visit/refresh
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', playCinematicIntro);
   } else {
-    playCinematicIntro(false);
+    playCinematicIntro();
   }
 }
 
@@ -3500,7 +3074,7 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
    ============================================================ */
 {
   if (!reduced) {
-    // Stagger in section cards
+    // Stagger in section cards on scroll
     const cardSections = ['#gameGrid', '.spec-grid', '.legend'];
     cardSections.forEach(sel => {
       const el = document.querySelector(sel);
@@ -3541,7 +3115,6 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     });
   }
 }
-
 
 /* Prevent gesture pinch-to-zoom on touch devices */
 document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
