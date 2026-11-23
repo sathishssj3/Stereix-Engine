@@ -30,7 +30,8 @@ if (!gotTheLock) {
 
 // Disable GPU disk cache in dev mode to prevent Chromium Windows file lock errors (0x5)
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
-// M-10: Renderer sandbox enabled by default for defense-in-depth isolation
+// Disable Chromium OS-level restricted token sandbox on Windows to prevent STATUS_BREAKPOINT (0x80000003) crashes
+app.commandLine.appendSwitch('no-sandbox');
 
 // Initialize core authorization token for DLL injector validation
 const STEREIX_AUTH_TOKEN = crypto.randomUUID();
@@ -109,7 +110,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true,
+      sandbox: false,
       webSecurity: true,
       allowRunningInsecureContent: false,
       preload: path.join(__dirname, 'preload.js'),
@@ -135,16 +136,27 @@ function createWindow() {
 
   // Show window in full window (maximized) only after renderer has painted — eliminates blank window phase
   mainWindow.once('ready-to-show', () => {
+    console.log('[WINDOW] ready-to-show fired');
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.maximize();
       mainWindow.show();
       mainWindow.focus();
+      console.log('[WINDOW] window shown and focused, isVisible:', mainWindow.isVisible());
     }
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[WINDOW] did-finish-load, current URL:', mainWindow?.webContents.getURL());
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.error('[WINDOW] did-fail-load:', code, desc, url);
   });
 
   // Fallback: force-show after 4s if ready-to-show never fires (e.g. render crash)
   setTimeout(() => {
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      console.log('[WINDOW] 4s fallback: forcing show');
       mainWindow.maximize();
       mainWindow.show();
       mainWindow.focus();

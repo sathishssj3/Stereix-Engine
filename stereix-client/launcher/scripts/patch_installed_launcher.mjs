@@ -11,7 +11,9 @@ const launcherDir = path.resolve(__dirname, '..');
 
 const candidateDirs = [
   path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'launcher'),
+  path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'Stereix Engine'),
   path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'NexVR Engine'),
+  path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Stereix Engine'),
   path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'NexVR Engine'),
 ];
 
@@ -27,9 +29,10 @@ if (!installedAsarPath || !fs.existsSync(installedAsarPath)) {
   process.exit(0);
 }
 
-// 1. Kill any running NexVR Engine instance so file handles are unlocked
+// 1. Kill any running Stereix / NexVR Engine instance so file handles are unlocked
 try {
   if (process.platform === 'win32') {
+    execSync('taskkill /F /IM "Stereix Engine.exe" /T 2>nul', { stdio: 'ignore' });
     execSync('taskkill /F /IM "NexVR Engine.exe" /T 2>nul', { stdio: 'ignore' });
     execSync('taskkill /F /IM electron.exe /T 2>nul', { stdio: 'ignore' });
     console.log('[PatchLauncher] Terminated running engine/electron processes to unlock files.');

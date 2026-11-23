@@ -1,7 +1,7 @@
 {
-  "engineVersion": "0.1.118",
-  "buildDate": "2026-11-21",
-  "timestamp": 1795299999763,
+  "engineVersion": "0.1.119",
+  "buildDate": "2026-11-23",
+  "timestamp": 1795443455552,
   "changelog": "Stereix Engine v0.1.110 � Universal IEC 61966-2-1 Display Calibration for Bit-Exact Monitor Color Fidelity, DX11 Compute State Initialization, Dynamic Flip-Model Swapchain Backbuffer Synchronization, and Guaranteed Monoscopic Fallback Protection",
   "features": [
     "P0 Direct3D 12 Monoscopic Menu Fallback: Guaranteed 2D blit of game backbuffer directly to OpenXR swapchains during title screens, loading screens, and cinematics, eliminating black headset display",
@@ -95,5 +95,5 @@
     "shaders/asw_shader.hlsl": "ae77436c5869e5dcd5175bc0050f3e55f1f9abebd3aed49336867954fcee461c",
     "shaders/depth_reprojection.hlsl": "eb0e672fdaebaea0e1afa542990770b5d7d5044a18156f983623478c9e0541f5"
   },
-  "signature": "c7d11e105c42cd92df36197df3d764b0af2ad8401e214e0d7bc8fc22f4d9a085140dfec8ad59904b128a2ea877dbc7c0128923f150a5e8e936c12f9e65519803"
+  "signature": "e81d395ed17d22a2e5400f9900eeeaa739e4c239e1a1c5997317c7339d0e49a4f245edae19bb19fcbad19fe345ea9e7f5b9909ff410258a786caec2e06047a07"
 }
