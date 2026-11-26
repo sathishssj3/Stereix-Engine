@@ -15,7 +15,9 @@
 #include "rendering/dx12/imgui_dx12_integration.h"
 #include "rendering/comfort_guard.h"
 #include "heuristics/depth_candidate_collector.h"
+#include "heuristics/depth_lock_manager.h"
 #include "rendering/dx12/dx12_descriptor_tracker.h"
+#include <atomic>
 #include <mutex>
 #include <shared_mutex>
 #include "rendering/dx12/dx12_lifecycle_manager.h"
@@ -125,7 +127,9 @@ void __stdcall hkUnmap(ID3D12Resource* pResource, UINT Subresource, const D3D12_
             __try {
                 D3D12_RESOURCE_DESC desc = pResource->GetDesc();
                 if (desc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER) {
-                    SubsystemContext::Get().GetUniversalScanner()->ProcessConstantBuffer(pData, static_cast<size_t>(desc.Width));
+                    if (auto* scanner = SubsystemContext::Get().GetUniversalScanner()) {
+                        scanner->ProcessConstantBuffer(pData, static_cast<size_t>(desc.Width));
+                    }
                 }
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
@@ -176,14 +180,21 @@ void VerifyHookIntegrityDX12() {
 }
 
 template<typename SwapChainType, typename OriginalFunc, typename... Args>
-HRESULT ProcessPresentDX12(SwapChainType* pSwapChain, OriginalFunc originalFunc, Args... args) {
+HRESULT ProcessPresentDX12(SwapChainType* pSwapChain, OriginalFunc originalFunc, bool& originalCalled, HRESULT& outHr, Args... args) {
     if (!vrinject::seh::IsValidMemoryPointer(pSwapChain) || !originalFunc) {
-        return originalFunc ? originalFunc(pSwapChain, args...) : DXGI_ERROR_INVALID_CALL;
+        if (originalFunc) {
+            originalCalled = true;
+            outHr = originalFunc(pSwapChain, args...);
+            return outHr;
+        }
+        return DXGI_ERROR_INVALID_CALL;
     }
 
-    if (vrinject::vulkan::VulkanLifecycleManager::Get().GetState() != vrinject::RenderState::UNINITIALIZED) {
-        // Vulkan is active, this is likely an internal driver swapchain presentation. Pass through.
-        return originalFunc(pSwapChain, args...);
+    // Only bypass DX12 if Vulkan is actively presenting (RUNNING), NOT INITIALIZING/DISCOVERING (HIGH-05)
+    if (vrinject::vulkan::VulkanLifecycleManager::Get().GetState() == vrinject::RenderState::RUNNING) {
+        originalCalled = true;
+        outHr = originalFunc(pSwapChain, args...);
+        return outHr;
     }
 
     HRESULT hr = S_OK;
@@ -211,16 +222,20 @@ HRESULT ProcessPresentDX12(SwapChainType* pSwapChain, OriginalFunc originalFunc,
         }
 
         // Execute original present first
+        originalCalled = true;
         hr = originalFunc(pSwapChain, args...);
+        outHr = hr;
 
         // Advance lifecycle state machine and get immutable snapshot
         RenderFrameSnapshot snapshot = Dx12LifecycleManager::Get().ProcessPresent(pSwapChain, pQueue, hr);
 
-        // Exception-safe RAII frame lifecycle
-        ScopedFrame frame(*SubsystemContext::Get().GetFrameCoordinator(), snapshot);
+        // Exception-safe RAII frame lifecycle (null-guarded, HIGH-05)
+        if (auto* frameCoord = SubsystemContext::Get().GetFrameCoordinator()) {
+            ScopedFrame frame(*frameCoord, snapshot);
+        }
 
-        static int s_frameCount = 0;
-        if (++s_frameCount % 600 == 0) {
+        static std::atomic<int> s_frameCount{0};
+        if (s_frameCount.fetch_add(1, std::memory_order_relaxed) % 600 == 599) {
             VerifyHookIntegrityDX12();
         }
 
@@ -235,48 +250,79 @@ HRESULT ProcessPresentDX12(SwapChainType* pSwapChain, OriginalFunc originalFunc,
     return hr;
 }
 
-static HRESULT hkPresentDX12Internal(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
+static HRESULT hkPresentDX12Internal(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags, bool& originalCalled, HRESULT& outHr) {
     UINT effectiveSyncInterval = SyncInterval;
     auto* coordinator = SubsystemContext::Get().GetFrameCoordinator();
     if (coordinator && coordinator->IsOpenXRReady()) {
         effectiveSyncInterval = 0; // Decouple from 60 Hz monitor VSync so OpenXR runs at full 90 Hz
     }
-    return ProcessPresentDX12(pSwapChain, OriginalPresentDX12, effectiveSyncInterval, Flags);
+    return ProcessPresentDX12(pSwapChain, OriginalPresentDX12, originalCalled, outHr, effectiveSyncInterval, Flags);
 }
 
 HRESULT __stdcall hkPresentDX12(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
+    bool originalCalled = false;
+    HRESULT outHr = DXGI_ERROR_INVALID_CALL;
     __try {
-        return hkPresentDX12Internal(pSwapChain, SyncInterval, Flags);
+        return hkPresentDX12Internal(pSwapChain, SyncInterval, Flags, originalCalled, outHr);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
-        LOG_ERROR("DX12Hook: SEH hardware exception caught in hkPresentDX12! Safely delegating to OriginalPresentDX12.");
-        return OriginalPresentDX12 ? OriginalPresentDX12(pSwapChain, SyncInterval, Flags) : DXGI_ERROR_INVALID_CALL;
+        LOG_ERROR("DX12Hook: SEH hardware exception caught in hkPresentDX12! (originalCalled=%d)", originalCalled ? 1 : 0);
+        if (!originalCalled && OriginalPresentDX12) {
+            return OriginalPresentDX12(pSwapChain, SyncInterval, Flags);
+        }
+        return outHr;
     }
 }
 
-static HRESULT hkPresent1DX12Internal(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters) {
+static HRESULT hkPresent1DX12Internal(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters, bool& originalCalled, HRESULT& outHr) {
     UINT effectiveSyncInterval = SyncInterval;
     auto* coordinator = SubsystemContext::Get().GetFrameCoordinator();
     if (coordinator && coordinator->IsOpenXRReady()) {
         effectiveSyncInterval = 0; // Decouple from 60 Hz monitor VSync so OpenXR runs at full 90 Hz
     }
-    return ProcessPresentDX12(pSwapChain, OriginalPresent1DX12, effectiveSyncInterval, PresentFlags, pPresentParameters);
+    return ProcessPresentDX12(pSwapChain, OriginalPresent1DX12, originalCalled, outHr, effectiveSyncInterval, PresentFlags, pPresentParameters);
 }
 
 HRESULT __stdcall hkPresent1DX12(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters) {
+    bool originalCalled = false;
+    HRESULT outHr = DXGI_ERROR_INVALID_CALL;
     __try {
-        return hkPresent1DX12Internal(pSwapChain, SyncInterval, PresentFlags, pPresentParameters);
+        return hkPresent1DX12Internal(pSwapChain, SyncInterval, PresentFlags, pPresentParameters, originalCalled, outHr);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
-        LOG_ERROR("DX12Hook: SEH hardware exception caught in hkPresent1DX12! Safely delegating to OriginalPresent1DX12.");
-        return OriginalPresent1DX12 ? OriginalPresent1DX12(pSwapChain, SyncInterval, PresentFlags, pPresentParameters) : DXGI_ERROR_INVALID_CALL;
+        LOG_ERROR("DX12Hook: SEH hardware exception caught in hkPresent1DX12! (originalCalled=%d)", originalCalled ? 1 : 0);
+        if (!originalCalled && OriginalPresent1DX12) {
+            return OriginalPresent1DX12(pSwapChain, SyncInterval, PresentFlags, pPresentParameters);
+        }
+        return outHr;
     }
 }
 
-static HRESULT hkResizeBuffersInternal(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags) {
-    LOG_INFO("DX12Hook: hkResizeBuffers requested format %d (%ux%u)", NewFormat, Width, Height);
+static void ClearDX12StateBeforeResize() {
+    // BUG-13 / HIGH-08: Release ALL DX12 swapchain & tracker references before ResizeBuffers/ResizeBuffers1
     Dx12LifecycleManager::Get().ReleaseSwapchainReferences();
-    HRESULT hr = OriginalResizeBuffers ? OriginalResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags) : DXGI_ERROR_INVALID_CALL;
+    Dx12DescriptorTracker::Get().Clear();
+    if (auto* depthCollector = SubsystemContext::Get().GetDepthCandidateCollector()) {
+        depthCollector->Clear();
+    }
+    if (auto* depthLockMgr = SubsystemContext::Get().GetDepthLockManager()) {
+        depthLockMgr->OnDeviceLost();
+    }
+    if (auto* camLockMgr = SubsystemContext::Get().GetCameraLockManager()) {
+        camLockMgr->Reset();
+    }
+    if (auto* frameCoord = SubsystemContext::Get().GetFrameCoordinator()) {
+        frameCoord->ReleaseGraphicsResources();
+    }
+}
+
+static HRESULT hkResizeBuffersInternal(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags, bool& originalCalled, HRESULT& outHr) {
+    LOG_INFO("DX12Hook: hkResizeBuffers requested format %d (%ux%u)", NewFormat, Width, Height);
+    ClearDX12StateBeforeResize();
+    if (!OriginalResizeBuffers) return DXGI_ERROR_INVALID_CALL;
+    originalCalled = true;
+    HRESULT hr = OriginalResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+    outHr = hr;
     if (SUCCEEDED(hr)) {
         Dx12LifecycleManager::Get().NotifyResizeComplete();
     }
@@ -284,19 +330,27 @@ static HRESULT hkResizeBuffersInternal(IDXGISwapChain* pSwapChain, UINT BufferCo
 }
 
 HRESULT __stdcall hkResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags) {
+    bool originalCalled = false;
+    HRESULT outHr = DXGI_ERROR_INVALID_CALL;
     __try {
-        return hkResizeBuffersInternal(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+        return hkResizeBuffersInternal(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags, originalCalled, outHr);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
-        LOG_ERROR("DX12Hook: SEH hardware exception caught in hkResizeBuffers! Forwarding to driver OriginalResizeBuffers.");
-        return OriginalResizeBuffers ? OriginalResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags) : DXGI_ERROR_INVALID_CALL;
+        LOG_ERROR("DX12Hook: SEH hardware exception caught in hkResizeBuffers! (originalCalled=%d)", originalCalled ? 1 : 0);
+        if (!originalCalled && OriginalResizeBuffers) {
+            return OriginalResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+        }
+        return outHr;
     }
 }
 
-static HRESULT hkResizeBuffers1Internal(IDXGISwapChain3* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags, const UINT* pCreationNodeMask, IUnknown* const* ppPresentQueue) {
+static HRESULT hkResizeBuffers1Internal(IDXGISwapChain3* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags, const UINT* pCreationNodeMask, IUnknown* const* ppPresentQueue, bool& originalCalled, HRESULT& outHr) {
     LOG_INFO("DX12Hook: hkResizeBuffers1 requested format %d (%ux%u)", NewFormat, Width, Height);
-    Dx12LifecycleManager::Get().ReleaseSwapchainReferences();
-    HRESULT hr = OriginalResizeBuffers1 ? OriginalResizeBuffers1(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags, pCreationNodeMask, ppPresentQueue) : DXGI_ERROR_INVALID_CALL;
+    ClearDX12StateBeforeResize();
+    if (!OriginalResizeBuffers1) return DXGI_ERROR_INVALID_CALL;
+    originalCalled = true;
+    HRESULT hr = OriginalResizeBuffers1(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags, pCreationNodeMask, ppPresentQueue);
+    outHr = hr;
     if (SUCCEEDED(hr)) {
         Dx12LifecycleManager::Get().NotifyResizeComplete();
     }
@@ -304,12 +358,17 @@ static HRESULT hkResizeBuffers1Internal(IDXGISwapChain3* pSwapChain, UINT Buffer
 }
 
 HRESULT __stdcall hkResizeBuffers1(IDXGISwapChain3* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags, const UINT* pCreationNodeMask, IUnknown* const* ppPresentQueue) {
+    bool originalCalled = false;
+    HRESULT outHr = DXGI_ERROR_INVALID_CALL;
     __try {
-        return hkResizeBuffers1Internal(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags, pCreationNodeMask, ppPresentQueue);
+        return hkResizeBuffers1Internal(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags, pCreationNodeMask, ppPresentQueue, originalCalled, outHr);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
-        LOG_ERROR("DX12Hook: SEH hardware exception caught in hkResizeBuffers1! Forwarding to driver OriginalResizeBuffers1.");
-        return OriginalResizeBuffers1 ? OriginalResizeBuffers1(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags, pCreationNodeMask, ppPresentQueue) : DXGI_ERROR_INVALID_CALL;
+        LOG_ERROR("DX12Hook: SEH hardware exception caught in hkResizeBuffers1! (originalCalled=%d)", originalCalled ? 1 : 0);
+        if (!originalCalled && OriginalResizeBuffers1) {
+            return OriginalResizeBuffers1(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags, pCreationNodeMask, ppPresentQueue);
+        }
+        return outHr;
     }
 }
 
@@ -320,27 +379,72 @@ void __stdcall hkCreateDepthStencilView(ID3D12Device* pDevice, ID3D12Resource* p
     }
 }
 
+static void TrackCopiedDsvRanges(
+    ID3D12Device* pDevice,
+    UINT NumDestDescriptorRanges,
+    const D3D12_CPU_DESCRIPTOR_HANDLE* pDestDescriptorRangeStarts,
+    const UINT* pDestDescriptorRangeSizes,
+    UINT NumSrcDescriptorRanges,
+    const D3D12_CPU_DESCRIPTOR_HANDLE* pSrcDescriptorRangeStarts,
+    const UINT* pSrcDescriptorRangeSizes)
+{
+    if (!pDevice || !pDestDescriptorRangeStarts || !pSrcDescriptorRangeStarts) return;
+    if (NumDestDescriptorRanges == 0 || NumSrcDescriptorRanges == 0) return;
+
+    const SIZE_T increment = pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+    UINT dstRange = 0, dstOffset = 0;
+    UINT srcRange = 0, srcOffset = 0;
+
+    while (dstRange < NumDestDescriptorRanges && srcRange < NumSrcDescriptorRanges) {
+        const UINT dstLen = pDestDescriptorRangeSizes ? pDestDescriptorRangeSizes[dstRange] : 1;
+        const UINT srcLen = pSrcDescriptorRangeSizes ? pSrcDescriptorRangeSizes[srcRange] : 1;
+        if (dstOffset >= dstLen) { dstRange++; dstOffset = 0; continue; }
+        if (srcOffset >= srcLen) { srcRange++; srcOffset = 0; continue; }
+
+        D3D12_CPU_DESCRIPTOR_HANDLE dst = pDestDescriptorRangeStarts[dstRange];
+        dst.ptr += static_cast<SIZE_T>(dstOffset) * increment;
+        D3D12_CPU_DESCRIPTOR_HANDLE src = pSrcDescriptorRangeStarts[srcRange];
+        src.ptr += static_cast<SIZE_T>(srcOffset) * increment;
+        Dx12DescriptorTracker::Get().CopyDescriptor(dst, src);
+
+        dstOffset++;
+        srcOffset++;
+    }
+}
+
 void __stdcall hkCopyDescriptors(ID3D12Device* pDevice, UINT NumDestDescriptorRanges, const D3D12_CPU_DESCRIPTOR_HANDLE* pDestDescriptorRangeStarts, const UINT* pDestDescriptorRangeSizes, UINT NumSrcDescriptorRanges, const D3D12_CPU_DESCRIPTOR_HANDLE* pSrcDescriptorRangeStarts, const UINT* pSrcDescriptorRangeSizes, D3D12_DESCRIPTOR_HEAP_TYPE DescriptorHeapsType) {
+    if (DescriptorHeapsType == D3D12_DESCRIPTOR_HEAP_TYPE_DSV && pDevice) {
+        __try {
+            TrackCopiedDsvRanges(
+                pDevice,
+                NumDestDescriptorRanges, pDestDescriptorRangeStarts, pDestDescriptorRangeSizes,
+                NumSrcDescriptorRanges, pSrcDescriptorRangeStarts, pSrcDescriptorRangeSizes);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
     if (OriginalCopyDescriptors) {
         OriginalCopyDescriptors(pDevice, NumDestDescriptorRanges, pDestDescriptorRangeStarts, pDestDescriptorRangeSizes, NumSrcDescriptorRanges, pSrcDescriptorRangeStarts, pSrcDescriptorRangeSizes, DescriptorHeapsType);
     }
 }
 
 void __stdcall hkCopyDescriptorsSimple(ID3D12Device* pDevice, UINT NumDescriptors, D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptorRangeStart, D3D12_CPU_DESCRIPTOR_HANDLE SrcDescriptorRangeStart, D3D12_DESCRIPTOR_HEAP_TYPE DescriptorHeapsType) {
-    SIZE_T increment = pDevice->GetDescriptorHandleIncrementSize(DescriptorHeapsType);
-    for (UINT i = 0; i < NumDescriptors; ++i) {
-        D3D12_CPU_DESCRIPTOR_HANDLE dst = DestDescriptorRangeStart;
-        dst.ptr += i * increment;
-        D3D12_CPU_DESCRIPTOR_HANDLE src = SrcDescriptorRangeStart;
-        src.ptr += i * increment;
-        Dx12DescriptorTracker::Get().CopyDescriptor(dst, src);
+    if (pDevice && NumDescriptors > 0 && DescriptorHeapsType == D3D12_DESCRIPTOR_HEAP_TYPE_DSV) {
+        __try {
+            SIZE_T increment = pDevice->GetDescriptorHandleIncrementSize(DescriptorHeapsType);
+            for (UINT i = 0; i < NumDescriptors; ++i) {
+                D3D12_CPU_DESCRIPTOR_HANDLE dst = DestDescriptorRangeStart;
+                dst.ptr += i * increment;
+                D3D12_CPU_DESCRIPTOR_HANDLE src = SrcDescriptorRangeStart;
+                src.ptr += i * increment;
+                Dx12DescriptorTracker::Get().CopyDescriptor(dst, src);
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
     if (OriginalCopyDescriptorsSimple) {
         OriginalCopyDescriptorsSimple(pDevice, NumDescriptors, DestDescriptorRangeStart, SrcDescriptorRangeStart, DescriptorHeapsType);
     }
 }
 
-static void hkExecuteCommandListsInternal(ID3D12CommandQueue* pCommandQueue, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists) {
+static void hkExecuteCommandListsInternal(ID3D12CommandQueue* pCommandQueue, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists, bool& originalCalled) {
     if (pCommandQueue && vrinject::seh::IsValidMemoryPointer(pCommandQueue)) {
         if (!DXGIFactoryHook::GetCapturedCommandQueue().Get()) {
             D3D12_COMMAND_QUEUE_DESC desc = pCommandQueue->GetDesc();
@@ -350,17 +454,19 @@ static void hkExecuteCommandListsInternal(ID3D12CommandQueue* pCommandQueue, UIN
         }
     }
     if (OriginalExecuteCommandLists) {
+        originalCalled = true;
         OriginalExecuteCommandLists(pCommandQueue, NumCommandLists, ppCommandLists);
     }
 }
 
 void __stdcall hkExecuteCommandLists(ID3D12CommandQueue* pCommandQueue, UINT NumCommandLists, ID3D12CommandList* const* ppCommandLists) {
+    bool originalCalled = false;
     __try {
-        hkExecuteCommandListsInternal(pCommandQueue, NumCommandLists, ppCommandLists);
+        hkExecuteCommandListsInternal(pCommandQueue, NumCommandLists, ppCommandLists, originalCalled);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
-        LOG_ERROR("DX12Hook: SEH hardware exception caught in hkExecuteCommandLists! Safely executing OriginalExecuteCommandLists.");
-        if (OriginalExecuteCommandLists) {
+        LOG_ERROR("DX12Hook: SEH hardware exception caught in hkExecuteCommandLists! (originalCalled=%d)", originalCalled ? 1 : 0);
+        if (!originalCalled && OriginalExecuteCommandLists) {
             OriginalExecuteCommandLists(pCommandQueue, NumCommandLists, ppCommandLists);
         }
     }
@@ -376,8 +482,9 @@ void __stdcall hkOMSetRenderTargets(ID3D12GraphicsCommandList* pCommandList, UIN
     if (pDepthStencilDescriptor && pDepthStencilDescriptor->ptr != 0) {
         GraphicsResourceIdentity identity;
         if (Dx12DescriptorTracker::Get().ResolveDescriptor(*pDepthStencilDescriptor, identity)) {
-            // Forward identity to collector.
-            SubsystemContext::Get().GetDepthCandidateCollector()->OnOMSetRenderTargets(identity);
+            if (auto* collector = SubsystemContext::Get().GetDepthCandidateCollector()) {
+                collector->OnOMSetRenderTargets(identity);
+            }
         }
     }
     if (OriginalOMSetRenderTargets) {
@@ -389,7 +496,9 @@ void __stdcall hkClearDepthStencilView(ID3D12GraphicsCommandList* pCommandList, 
     if (DepthStencilView.ptr != 0) {
         GraphicsResourceIdentity identity;
         if (Dx12DescriptorTracker::Get().ResolveDescriptor(DepthStencilView, identity)) {
-            SubsystemContext::Get().GetDepthCandidateCollector()->OnClearDepthStencilView(identity, Depth);
+            if (auto* collector = SubsystemContext::Get().GetDepthCandidateCollector()) {
+                collector->OnClearDepthStencilView(identity, Depth);
+            }
         }
     }
     if (OriginalClearDepthStencilView) {
@@ -400,13 +509,10 @@ void __stdcall hkClearDepthStencilView(ID3D12GraphicsCommandList* pCommandList, 
 
 bool Initialize() {
     LOG_INFO("DX12Hook: Initialize started");
-    MH_STATUS status = MH_Initialize();
-    if (status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED) {
-        LOG_ERROR("DX12Hook: MinHook failed");
-        return false;
-    }
+    // BUG-01/02: HookManager owns MinHook lifecycle (no redundant MH_Initialize here).
 
-    // Create dummy window and swapchain to get vtables
+    // Create dummy window and swapchain to get vtables (suppress DXGIFactoryHook dummy queue capture, HIGH-12)
+    DXGIFactoryHook::ScopedCaptureSuppression suppressCapture;
     WNDCLASSEXA wc = { sizeof(WNDCLASSEXA), CS_HREDRAW | CS_VREDRAW, DefWindowProcA, 0, 0, GetModuleHandle(nullptr), NULL, NULL, NULL, NULL, "VRInjectDummyDX12", NULL };
     RegisterClassExA(&wc);
     HWND hwnd = CreateWindowExA(0, wc.lpszClassName, "Dummy", WS_OVERLAPPEDWINDOW, 0, 0, 100, 100, NULL, NULL, wc.hInstance, NULL);
@@ -465,6 +571,11 @@ bool Initialize() {
         return false;
     }
     if (!pSwapChain) {
+        dxgiFactory->Release();
+        pCommandQueue->Release();
+        pDevice->Release();
+        DestroyWindow(hwnd);
+        UnregisterClassA(wc.lpszClassName, wc.hInstance);
         return false;
     }
     IDXGISwapChain* pSwapChain0 = pSwapChain;
@@ -591,7 +702,7 @@ bool Initialize() {
         // Extract filename from path
         size_t lastSlash = path.find_last_of("\\/");
         std::string filename = (lastSlash == std::string::npos) ? path : path.substr(lastSlash + 1);
-        auto toLower = [](std::string s) { for (auto& c : s) c = (char)tolower(c); return s; };
+        auto toLower = [](std::string s) { for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return s; };
         std::string filenameLower = toLower(filename);
         std::string pathLower = toLower(path);
 
@@ -738,17 +849,30 @@ bool Initialize() {
 }
 
 void Shutdown() {
-    if (g_targetExecuteCommandLists) { MH_DisableHook(g_targetExecuteCommandLists); g_targetExecuteCommandLists = nullptr; }
-    if (g_targetCreateDepthStencilView) { MH_DisableHook(g_targetCreateDepthStencilView); g_targetCreateDepthStencilView = nullptr; }
-    if (g_targetCopyDescriptors) { MH_DisableHook(g_targetCopyDescriptors); g_targetCopyDescriptors = nullptr; }
-    if (g_targetCopyDescriptorsSimple) { MH_DisableHook(g_targetCopyDescriptorsSimple); g_targetCopyDescriptorsSimple = nullptr; }
-    if (g_targetDrawIndexedInstanced) { MH_DisableHook(g_targetDrawIndexedInstanced); g_targetDrawIndexedInstanced = nullptr; }
-    if (g_targetOMSetRenderTargets) { MH_DisableHook(g_targetOMSetRenderTargets); g_targetOMSetRenderTargets = nullptr; }
-    if (g_targetClearDepthStencilView) { MH_DisableHook(g_targetClearDepthStencilView); g_targetClearDepthStencilView = nullptr; }
-    if (g_targetPresentDX12) { MH_DisableHook(g_targetPresentDX12); g_targetPresentDX12 = nullptr; }
-    if (g_targetPresent1DX12) { MH_DisableHook(g_targetPresent1DX12); g_targetPresent1DX12 = nullptr; }
-    if (g_targetResizeBuffers) { MH_DisableHook(g_targetResizeBuffers); g_targetResizeBuffers = nullptr; }
-    if (g_targetResizeBuffers1) { MH_DisableHook(g_targetResizeBuffers1); g_targetResizeBuffers1 = nullptr; }
+    auto removeHook = [](void*& target) {
+        if (target) {
+            MH_DisableHook(target);
+            MH_RemoveHook(target);
+            target = nullptr;
+        }
+    };
+    removeHook(g_targetExecuteCommandLists);
+    removeHook(g_targetCreateDepthStencilView);
+    removeHook(g_targetCopyDescriptors);
+    removeHook(g_targetCopyDescriptorsSimple);
+    removeHook(g_targetDrawIndexedInstanced);
+    removeHook(g_targetOMSetRenderTargets);
+    removeHook(g_targetClearDepthStencilView);
+    removeHook(g_targetPresentDX12);
+    removeHook(g_targetPresent1DX12);
+    removeHook(g_targetResizeBuffers);
+    removeHook(g_targetResizeBuffers1);
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_dx12MapMutex);
+        g_dx12MappedResources.clear();
+    }
+    g_mainSwapChain = nullptr;
 
     ImGuiDX12Integration::GetInstance().Shutdown();
     Dx12LifecycleManager::Get().Shutdown();

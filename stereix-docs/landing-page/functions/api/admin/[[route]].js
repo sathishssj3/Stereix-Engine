@@ -378,8 +378,9 @@ async function sendEmail(request, env) {
         let parsed = null;
         try { parsed = JSON.parse(errText); } catch {}
         if (parsed?.message && parsed.message.includes('You can only send testing emails to your own email address')) {
+          const registeredEmail = parsed.message.match(/\(([^)]+)\)/)?.[1] || env.ADMIN_EMAIL || 'your registered Resend account';
           return json({
-            error: `Resend Sandbox Limit: 'onboarding@resend.dev' can only send emails to your registered account (${parsed.message.match(/\(([^)]+)\)/)?.[1] || 'sathish6383349@gmail.com'}). To send to '${recipient}', please verify a custom domain at resend.com/domains.`,
+            error: `Resend Sandbox Limit: 'onboarding@resend.dev' can only send emails to your registered account (${registeredEmail}). To send to '${recipient}', please verify a custom domain at resend.com/domains.`,
             isSandboxRestriction: true,
           }, 403);
         }

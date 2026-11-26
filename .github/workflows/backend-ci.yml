@@ -14,9 +14,12 @@ on:
       - 'stereix-deployment/**'
       - '.github/workflows/backend-ci.yml'
 
+permissions:
+  contents: read
+
 jobs:
   test-and-lint:
-    name: Test and Build TypeScript
+    name: Test, Lint, and Build TypeScript
     runs-on: ubuntu-latest
 
     steps:
@@ -27,18 +30,31 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: 'stereix-backend/package-lock.json'
 
       - name: Install Dependencies
         working-directory: ./stereix-backend
-        run: npm install
+        run: npm ci
 
       - name: Prisma Generate
         working-directory: ./stereix-backend
         run: npx prisma generate
 
+      - name: Typecheck / Lint
+        working-directory: ./stereix-backend
+        run: npm run lint
+
       - name: Compile TypeScript
         working-directory: ./stereix-backend
         run: npm run build
+
+      - name: Run Backend Unit Tests
+        working-directory: ./stereix-backend
+        env:
+          NODE_ENV: test
+          JWT_SECRET: ci-test-jwt-secret-key-minimum-32-chars-0123456789
+        run: npm test
 
   docker-build:
     name: Build and Scan Docker Image

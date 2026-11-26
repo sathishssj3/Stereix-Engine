@@ -4,8 +4,19 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { VRConfig } from '../src/types';
 
-export const gamePathsMap: Record<string, string> = {};
-export const gameExeMap: Record<string, string> = {};
+export const gamePathsMap: Record<string, string> = Object.create(null);
+export const gameExeMap: Record<string, string> = Object.create(null);
+
+const FORBIDDEN_GAME_IDS = new Set([
+  '.',
+  '..',
+  '__proto__',
+  'constructor',
+  'prototype',
+  'tostring',
+  'valueof',
+  'hasownproperty',
+]);
 
 export function assertTrustedIpcSender(event: IpcMainInvokeEvent | IpcMainEvent): void {
   const senderUrl = event.senderFrame?.url || event.sender.getURL();
@@ -31,6 +42,9 @@ export function validateGameId(id: unknown): string {
   if (typeof id !== 'string') throw new Error('Invalid gameId type');
   if (!/^[a-zA-Z0-9_.-]+$/.test(id)) throw new Error('gameId contains invalid characters');
   if (id.length > 128) throw new Error('gameId too long');
+  if (id.includes('..') || id.startsWith('.') || id.endsWith('.') || FORBIDDEN_GAME_IDS.has(id.toLowerCase())) {
+    throw new Error('gameId contains forbidden path or prototype key');
+  }
   return id;
 }
 
@@ -38,7 +52,7 @@ export function validateConfig(cfg: unknown): VRConfig {
   if (typeof cfg !== 'object' || cfg === null) throw new Error('Invalid config');
   const c = cfg as Record<string, unknown>;
   const sens = Number(c.motionAimSensitivity);
-  if (isNaN(sens) || sens < 0.1 || sens > 10.0) throw new Error('motionAimSensitivity out of range');
+  if (!Number.isFinite(sens) || sens < 0.1 || sens > 10.0) throw new Error('motionAimSensitivity out of range');
   const res: VRConfig = {
     motionAimSensitivity: sens,
     useRecommendedResolution: Boolean(c.useRecommendedResolution),
@@ -47,21 +61,29 @@ export function validateConfig(cfg: unknown): VRConfig {
     rawInputMode: Boolean(c.rawInputMode),
     autoInjectOnLaunch: Boolean(c.autoInjectOnLaunch),
   };
-  if (typeof c.engine === 'string') res.engine = c.engine;
-  if (typeof c.api === 'string') res.api = c.api;
+  if (typeof c.engine === 'string') res.engine = c.engine.slice(0, 64);
+  if (typeof c.api === 'string') res.api = c.api.slice(0, 32);
   if (typeof c.reverseZ === 'boolean') res.reverseZ = c.reverseZ;
   if (typeof c.rowMajorMatrices === 'boolean') res.rowMajorMatrices = c.rowMajorMatrices;
-  if (typeof c.matrixPrecision === 'string') res.matrixPrecision = c.matrixPrecision;
-  if (c.contrast !== undefined && !isNaN(Number(c.contrast))) res.contrast = Math.max(0.5, Math.min(2.0, Number(c.contrast)));
-  if (c.saturation !== undefined && !isNaN(Number(c.saturation))) res.saturation = Math.max(0.5, Math.min(2.0, Number(c.saturation)));
-  if (c.brightness !== undefined && !isNaN(Number(c.brightness))) res.brightness = Math.max(0.5, Math.min(2.0, Number(c.brightness)));
+  if (typeof c.matrixPrecision === 'string') res.matrixPrecision = c.matrixPrecision.slice(0, 32);
+  if (c.contrast !== undefined && Number.isFinite(Number(c.contrast))) res.contrast = Math.max(0.5, Math.min(2.0, Number(c.contrast)));
+  if (c.saturation !== undefined && Number.isFinite(Number(c.saturation))) res.saturation = Math.max(0.5, Math.min(2.0, Number(c.saturation)));
+  if (c.brightness !== undefined && Number.isFinite(Number(c.brightness))) res.brightness = Math.max(0.5, Math.min(2.0, Number(c.brightness)));
   if (typeof c.performanceOverlay === 'boolean') res.performanceOverlay = c.performanceOverlay;
   if (typeof c.hapticFeedback === 'boolean') res.hapticFeedback = c.hapticFeedback;
   if (typeof c.aiInpainting === 'boolean') res.aiInpainting = c.aiInpainting;
   if (typeof c.telemetryOptIn === 'boolean') res.telemetryOptIn = c.telemetryOptIn;
-  if (typeof c.convergence === 'number' && !isNaN(c.convergence)) res.convergence = c.convergence;
-  if (typeof c.ipd === 'number' && !isNaN(c.ipd)) res.ipd = c.ipd;
-  if (typeof c.aiNotes === 'string') res.aiNotes = c.aiNotes;
+  if (c.convergence !== undefined && Number.isFinite(Number(c.convergence))) {
+    res.convergence = Math.max(0.2, Math.min(50.0, Number(c.convergence)));
+  }
+  if (c.ipd !== undefined && Number.isFinite(Number(c.ipd))) {
+    res.ipd = Math.max(0.045, Math.min(0.085, Number(c.ipd)));
+  }
+  if (typeof c.forceCinemaMode === 'boolean') res.forceCinemaMode = c.forceCinemaMode;
+  if (c.theaterDistance !== undefined && Number.isFinite(Number(c.theaterDistance))) {
+    res.theaterDistance = Math.max(1.0, Math.min(20.0, Number(c.theaterDistance)));
+  }
+  if (typeof c.aiNotes === 'string') res.aiNotes = c.aiNotes.slice(0, 2000);
   return res;
 }
 

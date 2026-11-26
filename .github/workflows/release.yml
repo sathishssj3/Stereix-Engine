@@ -26,10 +26,9 @@ jobs:
   build-and-test:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
       # Needed for the GitHub CodeQL action
       security-events: write
-      actions: write
 
     strategy:
       fail-fast: false
@@ -73,10 +72,16 @@ jobs:
     - name: Setup MSVC & CMake
       uses: ilammy/msvc-dev-cmd@v1.13.0
 
-    - name: Download Official DXC (for SPIR-V support)
-      shell: cmd
+    - name: Download Official DXC (SHA-256 Verified)
+      shell: pwsh
       run: |
-        curl.exe -L https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.7.2308/dxc_2023_08_14.zip -o dxc.zip
+        $ErrorActionPreference = 'Stop'
+        $expected = '01D4C4DFA37DEE21AFE70CAC510D63001B6B611A128E3760F168765EEAD1E625'
+        curl.exe -fsSL https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.7.2308/dxc_2023_08_14.zip -o dxc.zip
+        $actual = (Get-FileHash -LiteralPath dxc.zip -Algorithm SHA256).Hash.ToUpperInvariant()
+        if ($actual -ne $expected) {
+          throw "DXC SHA-256 mismatch! Expected $expected, got $actual"
+        }
         7z.exe x dxc.zip -odxc -y
 
     - name: Cache Vulkan SDK
@@ -84,17 +89,22 @@ jobs:
       uses: actions/cache@v4
       with:
         path: C:\VulkanSDK
-        key: vulkan-sdk-1.4-windows
+        key: vulkan-sdk-1.3.296.0-windows
 
-    - name: Setup Vulkan SDK
+    - name: Setup Vulkan SDK (SHA-256 Verified)
       if: steps.cache-vulkan.outputs.cache-hit != 'true'
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
         $VulkanVersion = "1.3.296.0"
+        $expected = 'ACB4AE0786FD3E558F8B3C36CC3EBA91638984217BA8A6795EC64D2F9FFD8C4B'
         $VulkanURL = "https://sdk.lunarg.com/sdk/download/$VulkanVersion/windows/VulkanSDK-$VulkanVersion-Installer.exe"
         Write-Host "Downloading Vulkan SDK $VulkanVersion..."
         Invoke-WebRequest -Uri $VulkanURL -OutFile VulkanSDK.exe
+        $actual = (Get-FileHash -LiteralPath .\VulkanSDK.exe -Algorithm SHA256).Hash.ToUpperInvariant()
+        if ($actual -ne $expected) {
+          throw "Vulkan SDK SHA-256 mismatch! Expected $expected, got $actual"
+        }
         Write-Host "Installing Vulkan SDK..."
         Start-Process -FilePath ".\VulkanSDK.exe" -ArgumentList "--root", "C:\VulkanSDK", "--accept-licenses", "--default-answer", "--confirm-command", "install" -Wait -NoNewWindow
 
@@ -144,20 +154,24 @@ jobs:
       shell: pwsh
       run: |
         $cppcheckVer = "2.14.0"
+        $expectedSha = "DF27B2346D941D7C502B3A95B10FFB0DFF9E06B6063F5C282452FADD8A78F54B"
         $zipUrl = "https://github.com/danmar/cppcheck/releases/download/$cppcheckVer/cppcheck-$cppcheckVer-x64-Setup.msi"
         $installDir = "$env:RUNNER_TEMP\cppcheck"
+        $msiPath = "$env:RUNNER_TEMP\cppcheck.msi"
 
-        Write-Host "Installing cppcheck $cppcheckVer..."
-        Invoke-WebRequest -Uri $zipUrl -OutFile "$env:RUNNER_TEMP\cppcheck.msi" -ErrorAction SilentlyContinue
-        if (Test-Path "$env:RUNNER_TEMP\cppcheck.msi") {
-          Start-Process msiexec.exe -ArgumentList "/i", "$env:RUNNER_TEMP\cppcheck.msi", "/qn", "INSTALLDIR=$installDir" -Wait -NoNewWindow
+        Write-Host "Installing cppcheck $cppcheckVer (SHA-256 verified)..."
+        Invoke-WebRequest -Uri $zipUrl -OutFile $msiPath -ErrorAction Stop
+        $actualSha = (Get-FileHash -LiteralPath $msiPath -Algorithm SHA256).Hash.ToUpperInvariant()
+        if ($actualSha -ne $expectedSha) {
+          Remove-Item -LiteralPath $msiPath -Force -ErrorAction SilentlyContinue
+          throw "Cppcheck MSI SHA-256 mismatch! Expected $expectedSha, got $actualSha"
         }
+        Start-Process msiexec.exe -ArgumentList "/i", $msiPath, "/qn", "INSTALLDIR=$installDir" -Wait -NoNewWindow
 
         $cppcheckExe = "$installDir\cppcheck.exe"
-        if (-not (Test-Path $cppcheckExe)) {
-          Write-Host "MSI install failed, trying choco..."
-          choco install cppcheck -y --no-progress | Out-Null
-          $cppcheckExe = "cppcheck"
+        if (-not (Test-Path -LiteralPath $cppcheckExe)) {
+          Write-Host "::warning::Cppcheck MSI installation did not produce cppcheck.exe; skipping non-fatal cppcheck."
+          exit 0
         }
 
         Write-Host "Running cppcheck..."
@@ -176,6 +190,20 @@ jobs:
           Write-Host "::warning::Cppcheck exited with code $code (non-fatal, CodeQL is primary analyzer)"
         }
         exit 0
+
+    - name: Verify Embedded DLL Hash Integrity (CRIT-03)
+      if: matrix.configuration == 'Release'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $dll = 'build/bin/vrinject.dll'
+        $cli = 'build/bin/vr-inject-cli.exe'
+        $dllHash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToUpperInvariant()
+        $cliImage = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $cli).Path)
+        if (-not [Text.Encoding]::Unicode.GetString($cliImage).Contains($dllHash)) {
+          throw "FATAL CRIT-03: build/bin/vrinject.dll SHA-256 ($dllHash) does NOT match EXPECTED_DLL_HASH in build/bin/vr-inject-cli.exe!"
+        }
+        Write-Host "[OK] Verified build/bin/vrinject.dll SHA-256 matches CLI embedded hash."
 
     - name: CodeQL Perform Analysis
       if: matrix.configuration == 'Release'
@@ -227,8 +255,13 @@ jobs:
 
     - name: Run Backend Test Suite
       working-directory: stereix-backend
+      env:
+        NODE_ENV: test
+        JWT_SECRET: ci-test-jwt-secret-key-minimum-32-chars-0123456789
       run: |
         npm ci
+        npx prisma generate
+        npm run lint
         npm test
 
     # Export compiled engine binaries from Release configuration so testers and the release job can reuse them
@@ -275,17 +308,9 @@ jobs:
       run: |
         $ErrorActionPreference = 'Stop'
         if ([string]::IsNullOrWhiteSpace($env:CERT_BASE64) -or [string]::IsNullOrWhiteSpace($env:CERT_PASSWORD)) {
-          Write-Host "::warning::No release signing certificate configured in repository secrets. Generating ephemeral self-signed certificate for release signing."
-          $certPassword = [Guid]::NewGuid().ToString()
-          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Stereix Engine CI" -CertStoreLocation "Cert:\CurrentUser\My" -KeyUsage DigitalSignature -FriendlyName "Stereix CI Certificate" -NotAfter (Get-Date).AddDays(7)
-          $certPath = Join-Path $env:RUNNER_TEMP 'stereix-signing.pfx'
-          $securePass = ConvertTo-SecureString -String $certPassword -Force -AsPlainText
-          Export-PfxCertificate -Cert $cert -FilePath $certPath -Password $securePass | Out-Null
-          "SIGN_CERT_PATH=$certPath" >> $env:GITHUB_ENV
-          "SIGN_CERT_PASS=$certPassword" >> $env:GITHUB_ENV
-          exit 0
+          throw "SIGN_CERT_PATH and SIGN_CERT_PASS secrets are required for tagged releases (ephemeral post-link certs break EXPECTED_DLL_HASH)."
         }
-        $certPath = Join-Path $env:RUNNER_TEMP 'nexvr-signing.pfx'
+        $certPath = Join-Path $env:RUNNER_TEMP 'stereix-signing.pfx'
         try {
           [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:CERT_BASE64))
           $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($certPath, $env:CERT_PASSWORD)
@@ -301,36 +326,32 @@ jobs:
         "SIGN_CERT_PATH=$certPath" >> $env:GITHUB_ENV
         "SIGN_CERT_PASS=$env:CERT_PASSWORD" >> $env:GITHUB_ENV
 
-    - name: Verify Signed Engine Binaries
+    - name: Verify Signed Engine Binaries (CRIT-03 Pre-Hash Preserved)
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
-        $cert = if ($env:SIGN_CERT_PATH -and (Test-Path $env:SIGN_CERT_PATH)) {
-          [Security.Cryptography.X509Certificates.X509Certificate2]::new($env:SIGN_CERT_PATH, $env:SIGN_CERT_PASS)
-        } else { $null }
         $dll = 'build/bin/vrinject.dll'
         $cli = 'build/bin/vr-inject-cli.exe'
-        foreach ($file in @($dll, $cli)) {
-          if (Test-Path $file) {
-            $signature = Get-AuthenticodeSignature -LiteralPath $file
-            if ($signature.Status -ne 'Valid' -and $cert) {
-              Write-Host "Signing $file with active certificate..."
-              try {
-                Set-AuthenticodeSignature -FilePath $file -Certificate $cert -HashAlgorithm SHA256 | Out-Null
-              } catch {
-                Write-Host "::warning::Could not sign $file: $_"
-              }
-            }
-          }
+        if (-not (Test-Path -LiteralPath $dll) -or -not (Test-Path -LiteralPath $cli)) {
+          throw "Missing required native engine binaries ($dll / $cli)."
         }
-        # Verify DLL hash match if embedded
-        if ((Test-Path $dll) -and (Test-Path $cli)) {
-          $dllHash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
-          $cliImage = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $cli).Path)
-          if (-not [Text.Encoding]::Unicode.GetString($cliImage).Contains($dllHash)) {
-            Write-Host "::warning::The signed DLL's SHA-256 does not match the CLI's embedded verification hash (acceptable for development builds)."
-          }
+        # NEVER re-sign vrinject.dll post-link (that mutates SHA-256 and triggers CLI Exit 14).
+        # vrinject.dll MUST already have been signed during build-and-test BEFORE expected_hash.h generation.
+        $dllSig = Get-AuthenticodeSignature -LiteralPath $dll
+        if ($dllSig.Status -ne 'Valid') {
+          throw "vrinject.dll is not validly Authenticode-signed from build-and-test (status: $($dllSig.Status))."
         }
+        $cliSig = Get-AuthenticodeSignature -LiteralPath $cli
+        if ($cliSig.Status -ne 'Valid') {
+          throw "vr-inject-cli.exe is not validly Authenticode-signed from build-and-test (status: $($cliSig.Status))."
+        }
+        # Hard CI gate: signed DLL SHA-256 MUST match UTF-16LE EXPECTED_DLL_HASH embedded in vr-inject-cli.exe
+        $dllHash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToUpperInvariant()
+        $cliImage = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $cli).Path)
+        if (-not [Text.Encoding]::Unicode.GetString($cliImage).Contains($dllHash)) {
+          throw "FATAL CRIT-03: Signed vrinject.dll SHA-256 ($dllHash) does NOT match EXPECTED_DLL_HASH embedded in vr-inject-cli.exe!"
+        }
+        Write-Host "[OK] Signed vrinject.dll SHA-256 matches CLI embedded UTF-16LE hash."
 
     - name: Verify Production Model Weights
       shell: pwsh
@@ -340,13 +361,8 @@ jobs:
         $ErrorActionPreference = 'Stop'
         $clientDir = if (Test-Path 'stereix-client') { 'stereix-client' } else { 'nexvr-client' }
         $modelDir = "$clientDir/models"
-        if (-not (Test-Path $modelDir)) { mkdir $modelDir }
         if ([string]::IsNullOrWhiteSpace($env:RELEASE_MODELS_SHA256)) {
-          Write-Host "::warning::No RELEASE_MODELS_SHA256 secret configured. Ensuring models exist for release packaging."
-          python "$clientDir/generate_dummy_onnx.py"
-          Copy-Item "$modelDir/dummy.onnx" "$modelDir/depth_inpainter.onnx" -Force -ErrorAction SilentlyContinue
-          Copy-Item "$modelDir/dummy_ui.onnx" "$modelDir/ui_synthesizer.onnx" -Force -ErrorAction SilentlyContinue
-          exit 0
+          throw "RELEASE_MODELS_SHA256 secret is required for tagged releases (dummy ONNX models cannot be shipped)."
         }
         try {
           $expected = ConvertFrom-Json -InputObject $env:RELEASE_MODELS_SHA256 -AsHashtable -ErrorAction Stop

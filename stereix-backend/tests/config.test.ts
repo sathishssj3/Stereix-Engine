@@ -35,4 +35,10 @@ describe('production JWT configuration', () => {
 
     expect(loadConfig()).toMatchObject({ NODE_ENV: 'production', JWT_SECRET: secret });
   });
+
+  it('defaults NODE_ENV to production and rejects missing JWT_SECRET when NODE_ENV is unset (HIGH-02)', () => {
+    delete process.env.NODE_ENV;
+    delete process.env.JWT_SECRET;
+    expect(() => loadConfig()).toThrow(/secure, custom JWT_SECRET/);
+  });
 });

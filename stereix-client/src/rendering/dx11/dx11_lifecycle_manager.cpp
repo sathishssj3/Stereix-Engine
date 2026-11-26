@@ -165,6 +165,7 @@ bool Dx11LifecycleManager::Rebuild() {
     m_swapchainResources.width = desc.BufferDesc.Width;
     m_swapchainResources.height = desc.BufferDesc.Height;
     m_swapchainResources.format = desc.BufferDesc.Format;
+    m_swapchainResources.outputWindow = desc.OutputWindow;
     
     BOOL fullscreen = FALSE;
     m_swapchainResources.swapChain->GetFullscreenState(&fullscreen, nullptr);
@@ -227,6 +228,7 @@ bool Dx11LifecycleManager::Recover() {
     m_deviceResources.immediateContext.Reset();
     m_deviceResources.device.Reset();
     m_swapchainResources.swapChain.Reset();
+    m_swapchainResources.outputWindow = nullptr;
 
     // Typically, the game will create a new device and swapchain, which we will hook on the next Present.
     return true;
@@ -246,6 +248,7 @@ RenderFrameSnapshot Dx11LifecycleManager::CreateSnapshot() {
     snap.nativeDevice = m_deviceResources.device.Get();
     snap.nativeContext = m_deviceResources.immediateContext.Get();
     snap.nativeSwapchain = m_swapchainResources.swapChain.Get();
+    snap.nativeHwnd = m_swapchainResources.outputWindow;
     snap.backBuffer = m_swapchainResources.backBuffer.Get();
     // note: native DX11 rtv is not exposed generically right now.
     // We could store it if needed, or recreate it when needed.
@@ -265,6 +268,7 @@ void Dx11LifecycleManager::Shutdown() {
     m_deviceResources.immediateContext.Reset();
     m_deviceResources.device.Reset();
     m_swapchainResources.swapChain.Reset();
+    m_swapchainResources.outputWindow = nullptr;
     m_state.store(RenderState::STOPPED, std::memory_order_release);
     LOG_INFO("Dx11LifecycleManager: Shutdown complete");
 }
@@ -279,6 +283,7 @@ void Dx11LifecycleManager::Reset() {
     m_deviceResources.immediateContext.Reset();
     m_deviceResources.device.Reset();
     m_swapchainResources.swapChain.Reset();
+    m_swapchainResources.outputWindow = nullptr;
 }
 
 void Dx11LifecycleManager::ReleaseSwapchainReferences() {
@@ -309,6 +314,7 @@ void Dx11LifecycleManager::ResetSwapchain() {
         m_deviceResources.immediateContext->Flush();
     }
     m_swapchainResources.swapChain.Reset();
+    m_swapchainResources.outputWindow = nullptr;
     m_swapchainResources.width = 0;
     m_swapchainResources.height = 0;
     m_swapchainResources.format = DXGI_FORMAT_UNKNOWN;

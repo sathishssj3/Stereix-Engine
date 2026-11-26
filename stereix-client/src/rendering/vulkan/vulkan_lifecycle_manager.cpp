@@ -2,10 +2,48 @@
 #include "rendering/vulkan/vulkan_queue_manager.h"
 #include "rendering/vulkan/vulkan_dispatch_table.h"
 #include "core/logger.h"
+#include <windows.h>
 #include <iostream>
 
 namespace vrinject {
 namespace vulkan {
+
+namespace {
+
+void* FindProcessMainWindow() {
+    const DWORD selfPid = ::GetCurrentProcessId();
+    HWND fg = ::GetForegroundWindow();
+    if (fg) {
+        DWORD fgPid = 0;
+        ::GetWindowThreadProcessId(fg, &fgPid);
+        if (fgPid == selfPid && ::IsWindowVisible(fg)) {
+            return fg;
+        }
+    }
+
+    struct EnumCtx {
+        DWORD pid;
+        HWND best;
+    } ctx{selfPid, nullptr};
+
+    ::EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
+        auto* c = reinterpret_cast<EnumCtx*>(lParam);
+        DWORD pid = 0;
+        ::GetWindowThreadProcessId(hwnd, &pid);
+        if (pid != c->pid) return TRUE;
+        if (!::IsWindowVisible(hwnd) || ::GetWindow(hwnd, GW_OWNER) != nullptr) return TRUE;
+        RECT rc{};
+        if (::GetClientRect(hwnd, &rc) && (rc.right - rc.left) > 0 && (rc.bottom - rc.top) > 0) {
+            c->best = hwnd;
+            return FALSE;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&ctx));
+
+    return ctx.best;
+}
+
+} // namespace
 
 VulkanLifecycleManager& VulkanLifecycleManager::Get() {
     static VulkanLifecycleManager instance;
@@ -108,12 +146,21 @@ void VulkanLifecycleManager::OnSurfaceDestroyed(VkInstance instance, VkSurfaceKH
     std::lock_guard lock(m_mutex);
     if (m_currentSurface == surface) {
         m_currentSurface = nullptr;
+        m_outputWindow = nullptr;
         m_surfaceGeneration++;
     }
 }
 
+void VulkanLifecycleManager::SetOutputWindow(void* hwnd) {
+    std::lock_guard lock(m_mutex);
+    m_outputWindow = hwnd;
+}
+
 RenderFrameSnapshot VulkanLifecycleManager::CreateSnapshot(VkQueue presentQueue) {
     std::lock_guard lock(m_mutex);
+    if (!m_outputWindow) {
+        m_outputWindow = FindProcessMainWindow();
+    }
     RenderFrameSnapshot snapshot;
     snapshot.backend = GraphicsBackend::Vulkan;
     snapshot.state = m_currentState;
@@ -121,6 +168,7 @@ RenderFrameSnapshot VulkanLifecycleManager::CreateSnapshot(VkQueue presentQueue)
     snapshot.nativeContext = presentQueue;
     snapshot.nativeSwapchain = m_currentSwapchain;
     snapshot.nativeSurface = m_currentSurface;
+    snapshot.nativeHwnd = m_outputWindow;
     snapshot.nativeInstance = m_currentInstance;
     snapshot.nativePhysicalDevice = m_currentPhysicalDevice;
     snapshot.width = m_width;

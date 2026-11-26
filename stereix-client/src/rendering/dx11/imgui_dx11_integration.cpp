@@ -137,27 +137,28 @@ void ImGuiDX11Integration::Render(ID3D11Device* device, ID3D11DeviceContext* con
 
     OverlayManager::GetInstance().Render();
 
-    // Stereoscopic Convergence:
-    // To fuse the in-headset menu at a comfortable reading depth (~1.8m)
-    // and eliminate double-vision/SBS in VR headsets, offset Left eye nasally (+X)
-    // and Right eye nasally (-X).
-    float stereoOffset = texDesc.Width * 0.022f; // ~2.2% horizontal shift
+    // Stereoscopic Convergence (direct eye-buffer fallback when HUD Quad layer is unavailable):
+    // Note: ImGui_ImplDX11_RenderDrawData overwrites RSSetViewports to TopLeftX=0 internally,
+    // so horizontal stereo shift MUST be applied via drawData->DisplayPos.x (not vp.TopLeftX).
+    float stereoOffset = texDesc.Width * 0.022f; // ~2.2% horizontal nasal convergence
 
     ImDrawData* drawData = ImGui::GetDrawData();
     if (drawData && drawData->TotalVtxCount > 0) {
-        // 1. Draw into Left Eye (shifted rightward toward nose)
-        vp.TopLeftX = stereoOffset;
-        context->RSSetViewports(1, &vp);
+        const ImVec2 origDisplayPos = drawData->DisplayPos;
+
+        // 1. Draw into Left Eye (shift menu rightward toward nose => DisplayPos.x -= stereoOffset)
+        drawData->DisplayPos.x = origDisplayPos.x - stereoOffset;
         context->OMSetRenderTargets(1, &rtvLeft, nullptr);
         ImGui_ImplDX11_RenderDrawData(drawData);
 
-        // 2. Draw into Right Eye (shifted leftward toward nose)
+        // 2. Draw into Right Eye (shift menu leftward toward nose => DisplayPos.x += stereoOffset)
         if (rtvRight) {
-            vp.TopLeftX = -stereoOffset;
-            context->RSSetViewports(1, &vp);
+            drawData->DisplayPos.x = origDisplayPos.x + stereoOffset;
             context->OMSetRenderTargets(1, &rtvRight, nullptr);
             ImGui_ImplDX11_RenderDrawData(drawData);
         }
+
+        drawData->DisplayPos = origDisplayPos;
     }
 
     // Restore previous render targets and viewport
@@ -170,6 +171,47 @@ void ImGuiDX11Integration::Render(ID3D11Device* device, ID3D11DeviceContext* con
     if (prevDsv) prevDsv->Release();
 }
 
+bool ImGuiDX11Integration::RenderToOverlayQuad(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* hudTexture) {
+    if (!m_initialized || !device || !context || !hudTexture) return false;
+
+    ID3D11RenderTargetView* rtvHud = GetOrCreateRtvForTexture(device, hudTexture, m_cachedTextureHud, m_cachedRtvHud);
+    if (!rtvHud) return false;
+
+    ID3D11RenderTargetView* prevRtv = nullptr;
+    ID3D11DepthStencilView* prevDsv = nullptr;
+    context->OMGetRenderTargets(1, &prevRtv, &prevDsv);
+
+    UINT numViewports = 1;
+    D3D11_VIEWPORT prevViewport = {};
+    context->RSGetViewports(&numViewports, &prevViewport);
+
+    D3D11_TEXTURE2D_DESC texDesc = {};
+    hudTexture->GetDesc(&texDesc);
+
+    const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    context->ClearRenderTargetView(rtvHud, clearColor);
+    context->OMSetRenderTargets(1, &rtvHud, nullptr);
+
+    OverlayManager::GetInstance().SetRenderTargetSize(static_cast<float>(texDesc.Width), static_cast<float>(texDesc.Height));
+    ImGui_ImplDX11_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    OverlayManager::GetInstance().Render();
+    OverlayManager::GetInstance().ClearRenderTargetSize();
+
+    ImDrawData* drawData = ImGui::GetDrawData();
+    if (drawData && drawData->TotalVtxCount > 0) {
+        ImGui_ImplDX11_RenderDrawData(drawData);
+    }
+
+    context->OMSetRenderTargets(1, &prevRtv, prevDsv);
+    if (numViewports > 0) {
+        context->RSSetViewports(1, &prevViewport);
+    }
+    if (prevRtv) prevRtv->Release();
+    if (prevDsv) prevDsv->Release();
+    return true;
+}
+
 void ImGuiDX11Integration::RenderToTexture(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* targetTexture) {
     Render(device, context, targetTexture, nullptr);
 }
@@ -180,6 +222,8 @@ void ImGuiDX11Integration::InvalidateDeviceObjects() {
         m_cachedTextureLeft.Reset();
         m_cachedRtvRight.Reset();
         m_cachedTextureRight.Reset();
+        m_cachedRtvHud.Reset();
+        m_cachedTextureHud.Reset();
         ImGui_ImplDX11_InvalidateDeviceObjects();
     }
 }
@@ -196,6 +240,8 @@ void ImGuiDX11Integration::Shutdown() {
         m_cachedTextureLeft.Reset();
         m_cachedRtvRight.Reset();
         m_cachedTextureRight.Reset();
+        m_cachedRtvHud.Reset();
+        m_cachedTextureHud.Reset();
         ImGui_ImplDX11_Shutdown();
         m_initialized = false;
         LOG_INFO("ImGuiDX11: Shutdown completed.");

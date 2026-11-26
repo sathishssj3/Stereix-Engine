@@ -5,16 +5,16 @@ import { TelemetryService } from './telemetry.service.js';
 const telemetryService = new TelemetryService();
 
 const telemetrySchema = z.object({
-  clientVersion: z.string().min(1),
-  gpuName: z.string().min(1),
-  driverVersion: z.string().optional(),
-  gameTitle: z.string().optional(),
-  targetApi: z.string().optional(),
-  frameRate: z.number().optional(),
-  frameTimeMs: z.number().optional(),
+  clientVersion: z.string().min(1).max(32),
+  gpuName: z.string().min(1).max(128),
+  driverVersion: z.string().max(64).optional(),
+  gameTitle: z.string().max(150).optional(),
+  targetApi: z.string().max(32).optional(),
+  frameRate: z.number().finite().min(0).max(10000).optional(),
+  frameTimeMs: z.number().finite().min(0).max(60000).optional(),
   isCrash: z.boolean().default(false),
-  errorDetails: z.string().optional(),
-  stackTrace: z.string().optional(),
+  errorDetails: z.string().max(2000).optional(),
+  stackTrace: z.string().max(8000).optional(),
 });
 
 export class TelemetryController {

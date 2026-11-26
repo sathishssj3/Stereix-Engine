@@ -8,10 +8,12 @@
 namespace vrinject {
 
 struct EyeView {
-    Matrix4x4 view;
-    Matrix4x4 projection;
-    Matrix4x4 viewProjection;
-    Vector3 eyePosition;
+    Matrix4x4 view = {};
+    Matrix4x4 projection = {};
+    Matrix4x4 viewProjection = {};
+    Vector3 eyePosition = {};
+    // OpenXR per-eye asymmetric frustum tangents: { tanLeft, tanRight, tanDown, tanUp }
+    float fovTan[4] = { -1.0f, 1.0f, -0.5625f, 0.5625f };
 };
 
 struct StereoConstants {

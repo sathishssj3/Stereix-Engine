@@ -77,6 +77,16 @@ export function sanitizeTelemetry(text: string): string {
   return s;
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 10000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function sendDiscordTelemetry(
   payload: TelemetryPayload
 ): Promise<{ success: boolean; message?: string }> {
@@ -104,6 +114,9 @@ export async function sendDiscordTelemetry(
     } catch {}
   }
   const sanitized = sanitizeTelemetry(logText);
+  // MED-06: Sanitize message, userNote, and gameName as well so usernames/IPs/paths never leak
+  const sanitizedMessage = sanitizeTelemetry(payload.message || '');
+  const sanitizedGameName = sanitizeTelemetry(payload.gameName || payload.gameId);
   const currentVersion = getAppVersion();
 
   let cloudflareDelivered = false;
@@ -113,23 +126,23 @@ export async function sendDiscordTelemetry(
   try {
     const cfPayload = {
       gameId: payload.gameId,
-      gameName: payload.gameName || payload.gameId,
+      gameName: sanitizedGameName,
       engineVersion: currentVersion,
       status: payload.status,
       vrHeadset: payload.vrHeadset || 'Unknown HMD',
       vrRuntime: payload.vrRuntime || 'OpenXR',
-      message: payload.message || '',
-      userNote: payload.status === 'manual_report' ? payload.message : '',
+      message: sanitizedMessage,
+      userNote: payload.status === 'manual_report' ? sanitizedMessage : '',
       logContent: sanitized.length > 50000 ? sanitized.slice(-50000) : sanitized,
       durationSec: payload.durationSec,
       config: payload.config,
     };
 
-    const cfRes = await fetch(CLOUDFLARE_TELEMETRY_API, {
+    const cfRes = await fetchWithTimeout(CLOUDFLARE_TELEMETRY_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfPayload),
-    });
+    }, 10000);
     if (cfRes.ok) {
       cloudflareDelivered = true;
     }
@@ -168,7 +181,7 @@ export async function sendDiscordTelemetry(
         embedColor = 0xa855f7; // Purple
       }
 
-      const title = `${statusEmoji} Stereix Engine [v${currentVersion}] — ${payload.gameName || payload.gameId}`;
+      const title = `${statusEmoji} Stereix Engine [v${currentVersion}] — ${sanitizedGameName}`;
 
       const fields: Array<{ name: string; value: string; inline?: boolean }> = [
         { name: 'Game ID', value: `\`${payload.gameId}\``, inline: true },
@@ -190,10 +203,10 @@ export async function sendDiscordTelemetry(
         fields.push({ name: 'Session Duration', value: durationStr, inline: true });
       }
 
-      if (payload.message) {
+      if (sanitizedMessage) {
         fields.push({
           name: 'Message',
-          value: `\`\`\`\n${payload.message.slice(0, 1000)}\n\`\`\``,
+          value: `\`\`\`\n${sanitizedMessage.slice(0, 1000)}\n\`\`\``,
         });
       }
 
@@ -206,11 +219,11 @@ export async function sendDiscordTelemetry(
       };
 
       if (!sanitized) {
-        const res = await fetch(webhookUrl, {
+        const res = await fetchWithTimeout(webhookUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ embeds: [embedObj] }),
-        });
+        }, 10000);
         if (res.ok) discordDelivered = true;
       } else {
         const cappedLog = sanitized.length > 4 * 1024 * 1024 ? sanitized.slice(-4 * 1024 * 1024) : sanitized;
@@ -219,10 +232,10 @@ export async function sendDiscordTelemetry(
         const logFilename = `stereix_${payload.gameId}_${Date.now()}.log`;
         formData.append('files[0]', new Blob([cappedLog], { type: 'text/plain' }), logFilename);
 
-        const res = await fetch(webhookUrl, {
+        const res = await fetchWithTimeout(webhookUrl, {
           method: 'POST',
           body: formData,
-        });
+        }, 15000);
         if (res.ok) discordDelivered = true;
       }
     } catch (err: any) {

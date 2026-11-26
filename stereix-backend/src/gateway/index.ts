@@ -5,7 +5,7 @@ import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import { config } from '../common/config.js';
 import { logger } from '../common/logger.js';
-import { errorHandler, NotFoundError } from '../common/errors.js';
+import { errorHandler, ForbiddenError, NotFoundError } from '../common/errors.js';
 import { db } from '../common/db.js';
 import { redis } from '../common/redis.js';
 
@@ -19,6 +19,9 @@ import { telemetryRouter } from '../services/telemetry/telemetry.routes.js';
 
 const app = express();
 
+// HIGH-03: Trust first proxy hop so req.ip and express-rate-limit key on real client IP
+app.set('trust proxy', 1);
+
 // Security Headers
 app.use(helmet());
 
@@ -31,16 +34,17 @@ app.use(
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error('Blocked by CORS policy'));
+        // HIGH-03: Return HTTP 403 Forbidden (not HTTP 500) on CORS rejection
+        callback(new ForbiddenError('Blocked by CORS policy'));
       }
     },
     credentials: true,
   })
 );
 
-// Body Parsers
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Body Parsers (HIGH-03: Tightened from 10mb to 100kb to prevent memory/payload DoS)
+app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
 // HTTP Request Logging
 app.use(

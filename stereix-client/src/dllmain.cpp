@@ -26,8 +26,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved) {
         }
 
         case DLL_PROCESS_DETACH: {
-            // Initiate teardown on a background thread without blocking
-            vrinject::RuntimeState::Get().OnDllProcessDetach();
+            // HIGH-06: Pass process-termination flag (reserved != nullptr) so OnDllProcessDetach
+            // never locks mutexes or blocks when the OS is forcibly terminating the process.
+            vrinject::RuntimeState::Get().OnDllProcessDetach(reserved != nullptr);
             break;
         }
 

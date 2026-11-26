@@ -7,21 +7,21 @@ namespace vrinject {
 
 struct CameraSnapshot
 {
-    uint64_t frame;
+    uint64_t frame = 0;
 
-    Matrix4x4 view;
-    Matrix4x4 projection;
-    Matrix4x4 vp;
+    Matrix4x4 view = {};
+    Matrix4x4 projection = {};
+    Matrix4x4 vp = {};
 
-    Vector3 position;
-    Quaternion rotation;
+    Vector3 position = {};
+    Quaternion rotation = {0.0f, 0.0f, 0.0f, 1.0f};
 
-    float confidence;
-    bool reversedZ;
-    bool isLeftHanded;
-    bool valid;
+    float confidence = 0.0f;
+    bool reversedZ = false;
+    bool isLeftHanded = false;
+    bool valid = false;
     
-    GraphicsResourceIdentity resourceIdentity;
+    GraphicsResourceIdentity resourceIdentity = {};
 
     bool IsValid() const {
         return valid && confidence > 0.5f && resourceIdentity.IsValid();

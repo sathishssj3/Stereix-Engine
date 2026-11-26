@@ -35,7 +35,7 @@ bool CheckAntiCheatRunning() {
     if (::Process32First(hSnap, &pe)) {
         do {
             std::string pName = pe.szExeFile;
-            for (char& c : pName) c = static_cast<char>(std::tolower(c));
+            for (char& c : pName) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             for (const char* blocked : strict_ac_blocklist) {
                 if (pName.find(blocked) != std::string::npos) {
                     detected = true;
@@ -66,19 +66,50 @@ void RuntimeState::WaitForPhase(RuntimePhase phase) {
     });
 }
 
-void RuntimeState::OnDllProcessAttach(void* hModule) {
-    m_hModule = hModule;
-    TransitionTo(RuntimePhase::Attached);
-
-    m_workerThread = std::thread(&RuntimeState::BackgroundInitialize, this);
-    m_workerThread.detach();
+unsigned long __stdcall RuntimeState::InitThreadProc(void* param) {
+    auto* self = static_cast<RuntimeState*>(param);
+    if (self) {
+        self->BackgroundInitialize();
+    }
+    return 0;
 }
 
-void RuntimeState::OnDllProcessDetach() {
-    TransitionTo(RuntimePhase::Stopping);
+void RuntimeState::OnDllProcessAttach(void* hModule) {
+    // HIGH-06: Called under Windows loader lock — NEVER construct std::thread or lock std::mutex here.
+    // Use raw Win32 CreateThread + CloseHandle (BUG-05) and lock-free atomics.
+    m_hModule = hModule;
+    m_phase.store(RuntimePhase::Attached, std::memory_order_release);
+
+    HANDLE hThread = ::CreateThread(nullptr, 0, &RuntimeState::InitThreadProc, this, 0, nullptr);
+    if (hThread) {
+        ::CloseHandle(hThread);
+    } else {
+        m_phase.store(RuntimePhase::Error, std::memory_order_release);
+    }
+}
+
+void RuntimeState::OnDllProcessDetach(bool processTerminating) {
+    // HIGH-06: Never acquire m_stateMutex under loader lock during DLL_PROCESS_DETACH.
+    m_phase.store(RuntimePhase::Stopping, std::memory_order_release);
+    if (processTerminating) {
+        // Process is exiting and other threads are already terminated by the OS; return immediately.
+        return;
+    }
+    HANDLE hStop = static_cast<HANDLE>(m_stopEvent.load(std::memory_order_acquire));
+    if (hStop) {
+        ::SetEvent(hStop);
+    }
 }
 
 void RuntimeState::BackgroundInitialize() {
+    HANDLE hStop = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (hStop) {
+        m_stopEvent.store(hStop, std::memory_order_release);
+        if (m_phase.load(std::memory_order_acquire) == RuntimePhase::Stopping) {
+            ::SetEvent(hStop);
+        }
+    }
+
     TransitionTo(RuntimePhase::Initializing);
     
     // Pin module
@@ -88,42 +119,49 @@ void RuntimeState::BackgroundInitialize() {
         reinterpret_cast<LPCSTR>(&RuntimeState::Get),
         &pinnedModule);
 
-    // Initialize logger
-    char dllDir[MAX_PATH]{};
-    if (::GetModuleFileNameA(static_cast<HMODULE>(m_hModule), dllDir, MAX_PATH)) {
-        char* lastSlash = std::strrchr(dllDir, '\\');
-        if (lastSlash) *(lastSlash + 1) = '\0';
+    // Initialize logger using std::string (MED-02: avoids MAX_PATH strcat_s overflow crash)
+    char dllBuf[1024]{};
+    std::string dllDir;
+    DWORD dllLen = ::GetModuleFileNameA(static_cast<HMODULE>(m_hModule), dllBuf, static_cast<DWORD>(std::size(dllBuf)));
+    if (dllLen > 0 && dllLen < std::size(dllBuf)) {
+        dllDir.assign(dllBuf, dllLen);
+        size_t lastSlash = dllDir.find_last_of("\\/");
+        if (lastSlash != std::string::npos) {
+            dllDir.resize(lastSlash + 1);
+        } else {
+            dllDir.clear();
+        }
     }
 
-    char exePath[MAX_PATH]{};
-    ::GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    char exeBuf[1024]{};
+    std::string exePath;
+    DWORD exeLen = ::GetModuleFileNameA(nullptr, exeBuf, static_cast<DWORD>(std::size(exeBuf)));
+    if (exeLen > 0 && exeLen < std::size(exeBuf)) {
+        exePath.assign(exeBuf, exeLen);
+    }
 
-    char logPath[MAX_PATH];
-    if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, logPath))) {
-        strcat_s(logPath, "\\VRInject");
-        ::CreateDirectoryA(logPath, nullptr);
-        strcat_s(logPath, "\\vrinject.log");
+    std::string logPath;
+    char appDataBuf[MAX_PATH]{};
+    if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appDataBuf))) {
+        std::string vrDir = std::string(appDataBuf) + "\\VRInject";
+        ::CreateDirectoryA(vrDir.c_str(), nullptr);
+        logPath = vrDir + "\\vrinject.log";
     } else {
-        strcpy_s(logPath, dllDir);
-        strcat_s(logPath, "vrinject.log");
+        logPath = dllDir + "vrinject.log";
     }
     
     auto logger = std::make_shared<FileLogger>();
     logger->Init(logPath);
 
     // Also attach secondary log in dll directory
-    char dllLogPath[MAX_PATH];
-    strcpy_s(dllLogPath, dllDir);
-    strcat_s(dllLogPath, "vrinject.log");
-    logger->AddSecondaryPath(dllLogPath);
+    if (!dllDir.empty()) {
+        logger->AddSecondaryPath(dllDir + "vrinject.log");
+    }
 
     // Also attach secondary log in game executable directory if different
-    char exeDirLogPath[MAX_PATH];
-    strcpy_s(exeDirLogPath, exePath);
-    char* exeSlash = std::strrchr(exeDirLogPath, '\\');
-    if (exeSlash) {
-        *(exeSlash + 1) = '\0';
-        strcat_s(exeDirLogPath, "vrinject.log");
+    size_t exeSlash = exePath.find_last_of("\\/");
+    if (exeSlash != std::string::npos) {
+        std::string exeDirLogPath = exePath.substr(0, exeSlash + 1) + "vrinject.log";
         logger->AddSecondaryPath(exeDirLogPath);
     }
 
@@ -136,9 +174,9 @@ void RuntimeState::BackgroundInitialize() {
     LOG_INFO("========================================");
     LOG_INFO("NexVR Engine v" NEXVR_ENGINE_VERSION " - Initializing");
     LOG_INFO("========================================");
-    LOG_INFO("[DIAGNOSTICS] Host Process: %s", exePath);
-    LOG_INFO("[DIAGNOSTICS] Module DLL Dir: %s", dllDir);
-    LOG_INFO("[DIAGNOSTICS] Primary Log Path: %s", logPath);
+    LOG_INFO("[DIAGNOSTICS] Host Process: %s", exePath.c_str());
+    LOG_INFO("[DIAGNOSTICS] Module DLL Dir: %s", dllDir.c_str());
+    LOG_INFO("[DIAGNOSTICS] Primary Log Path: %s", logPath.c_str());
 
     const auto& cfg = config->GetConfig();
     LOG_INFO("[DIAGNOSTICS] Config: IPD=%.3fm, Convergence=%.1fm, ResScale=%.2f", cfg.ipd, cfg.convergence, cfg.resolutionScale);
@@ -179,26 +217,33 @@ void RuntimeState::BackgroundInitialize() {
         TransitionTo(RuntimePhase::Error);
     }
 
-    // R5 / L-6: Park the existing worker thread here, with periodic anti-cheat polling
-    {
-        std::unique_lock<std::mutex> lock(m_stateMutex);
-        while (m_phase.load() != RuntimePhase::Stopping && m_phase.load() != RuntimePhase::Stopped) {
-            if (m_stateCv.wait_for(lock, std::chrono::seconds(5), [this]() {
-                return m_phase.load() == RuntimePhase::Stopping || m_phase.load() == RuntimePhase::Stopped;
-            })) {
+    // R5 / L-6: Park the existing worker thread here, waking via lock-free Win32 event + periodic anti-cheat polling
+    while (m_phase.load(std::memory_order_acquire) != RuntimePhase::Stopping &&
+           m_phase.load(std::memory_order_acquire) != RuntimePhase::Stopped) {
+        HANDLE hWait = static_cast<HANDLE>(m_stopEvent.load(std::memory_order_acquire));
+        if (hWait) {
+            DWORD waitRes = ::WaitForSingleObject(hWait, 5000);
+            if (waitRes == WAIT_OBJECT_0) {
                 break;
             }
-            // Periodic L-6 anti-cheat tripwire check while running
-            if (m_phase.load() == RuntimePhase::Running && CheckAntiCheatRunning()) {
-                LOG_ERROR("[SECURITY] Anti-Cheat service launched after injection! Initiating emergency shutdown.");
-                m_phase.store(RuntimePhase::Stopping);
-                break;
-            }
+        } else {
+            ::Sleep(500);
+        }
+        // Periodic L-6 anti-cheat tripwire check while running
+        if (m_phase.load(std::memory_order_acquire) == RuntimePhase::Running && CheckAntiCheatRunning()) {
+            LOG_ERROR("[SECURITY] Anti-Cheat service launched after injection! Initiating emergency shutdown.");
+            m_phase.store(RuntimePhase::Stopping, std::memory_order_release);
+            break;
         }
     }
 
     // Perform teardown on the original worker thread
     BackgroundTeardown();
+
+    HANDLE hClose = static_cast<HANDLE>(m_stopEvent.exchange(nullptr, std::memory_order_acq_rel));
+    if (hClose) {
+        ::CloseHandle(hClose);
+    }
 }
 
 void RuntimeState::BackgroundTeardown() {

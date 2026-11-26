@@ -234,7 +234,9 @@ void OverlayManager::Render() {
     
     ImGuiIO& io = ImGui::GetIO();
     RECT clientRect = {};
-    if (m_hwnd && GetClientRect(m_hwnd, &clientRect) && (clientRect.right > clientRect.left)) {
+    if (m_overrideWidth > 0.0f && m_overrideHeight > 0.0f) {
+        io.DisplaySize = ImVec2(m_overrideWidth, m_overrideHeight);
+    } else if (m_hwnd && GetClientRect(m_hwnd, &clientRect) && (clientRect.right > clientRect.left)) {
         io.DisplaySize = ImVec2((float)(clientRect.right - clientRect.left), (float)(clientRect.bottom - clientRect.top));
     } else if (io.DisplaySize.x <= 0.0f || io.DisplaySize.y <= 0.0f) {
         io.DisplaySize = ImVec2(1920.0f, 1080.0f);

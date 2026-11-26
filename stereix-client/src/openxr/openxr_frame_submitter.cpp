@@ -16,46 +16,60 @@ OpenXRFrameSubmitter::~OpenXRFrameSubmitter() {
     StopPacingThread();
 }
 
-void OpenXRFrameSubmitter::EnsurePacingThreadRunning(XrSession session) {
-    if (!session || session == XR_NULL_HANDLE) return;
-    
-    if (pacingSession_ != session || !pacingRunning_.load()) {
-        StopPacingThread();
-        
-        std::lock_guard<std::mutex> lock(pacingMutex_);
-        pacingSession_ = session;
-        pacingRunning_.store(true);
-        pacingWaitRequested_ = true; // Request immediate wait for first frame
-        pacingFrameReady_ = false;
-        pacingThread_ = std::thread(&OpenXRFrameSubmitter::PacingThreadLoop, this);
-    }
-}
-
-void OpenXRFrameSubmitter::StopPacingThread() {
+void OpenXRFrameSubmitter::BeginShutdown() {
     {
         std::lock_guard<std::mutex> lock(pacingMutex_);
-        pacingRunning_.store(false);
+        pacingRunning_.store(false, std::memory_order_release);
         pacingWaitRequested_ = false;
         pacingSession_ = XR_NULL_HANDLE;
     }
     cvPacingRequest_.notify_all();
     cvPacingReady_.notify_all();
+}
+
+void OpenXRFrameSubmitter::EnsurePacingThreadRunning(XrSession session) {
+    if (!session || session == XR_NULL_HANDLE) return;
+
+    bool needRestart = false;
+    {
+        std::lock_guard<std::mutex> lock(pacingMutex_);
+        needRestart = (pacingSession_ != session || !pacingRunning_.load(std::memory_order_acquire));
+    }
+
+    if (needRestart) {
+        StopPacingThread();
+
+        std::lock_guard<std::mutex> lock(pacingMutex_);
+        pacingSession_ = session;
+        pacingRunning_.store(true, std::memory_order_release);
+        pacingWaitRequested_ = true; // Request immediate wait for first frame
+        pacingInFlight_ = false;
+        pacingFrameReady_ = false;
+        pacingFailed_ = false;
+        pacingThread_ = std::thread(&OpenXRFrameSubmitter::PacingThreadLoop, this);
+    }
+}
+
+void OpenXRFrameSubmitter::StopPacingThread() {
+    BeginShutdown();
     if (pacingThread_.joinable()) {
         pacingThread_.join();
     }
 }
 
 void OpenXRFrameSubmitter::PacingThreadLoop() {
-    while (pacingRunning_.load()) {
+    while (pacingRunning_.load(std::memory_order_acquire)) {
         XrSession session = XR_NULL_HANDLE;
         {
             std::unique_lock<std::mutex> lock(pacingMutex_);
             cvPacingRequest_.wait(lock, [this]() {
-                return !pacingRunning_.load() || pacingWaitRequested_;
+                return !pacingRunning_.load(std::memory_order_acquire) || pacingWaitRequested_;
             });
-            if (!pacingRunning_.load()) break;
+            if (!pacingRunning_.load(std::memory_order_acquire)) break;
             session = pacingSession_;
             pacingWaitRequested_ = false;
+            pacingInFlight_ = (session != XR_NULL_HANDLE);
+            pacingFailed_ = false;
         }
 
         if (session != XR_NULL_HANDLE) {
@@ -65,11 +79,14 @@ void OpenXRFrameSubmitter::PacingThreadLoop() {
 
             {
                 std::lock_guard<std::mutex> lock(pacingMutex_);
+                pacingInFlight_ = false;
                 if (XR_SUCCEEDED(res)) {
                     pacingFrameState_ = frameState;
                     pacingFrameReady_ = true;
+                    pacingFailed_ = false;
                 } else {
                     pacingFrameReady_ = false;
+                    pacingFailed_ = true;
                 }
             }
             cvPacingReady_.notify_all();
@@ -77,28 +94,48 @@ void OpenXRFrameSubmitter::PacingThreadLoop() {
     }
 }
 
-bool OpenXRFrameSubmitter::ConsumePacedFrameState(XrSession session, XrFrameState& outFrameState) {
+bool OpenXRFrameSubmitter::ConsumePacedFrameState(XrSession session, XrFrameState& outFrameState, bool& outPacingBusyOrFailed) {
     std::unique_lock<std::mutex> lock(pacingMutex_);
-    if (!pacingRunning_.load()) return false;
+    outPacingBusyOrFailed = false;
+    if (!pacingRunning_.load(std::memory_order_acquire) || pacingSession_ != session) return false;
 
-    if (!pacingFrameReady_) {
-        // Wait up to 16ms for the pacing thread to complete xrWaitFrame
+    if (!pacingFrameReady_ && !pacingFailed_ && (pacingInFlight_ || pacingWaitRequested_)) {
+        // Wait up to 16ms ONLY when a pacing wait is actually requested or in flight (avoid 16ms dead-stall after failed xrBeginFrame)
         cvPacingReady_.wait_for(lock, std::chrono::milliseconds(16), [this]() {
-            return pacingFrameReady_ || !pacingRunning_.load();
+            return pacingFrameReady_ || pacingFailed_ || !pacingRunning_.load(std::memory_order_acquire);
         });
     }
 
     if (pacingFrameReady_) {
         outFrameState = pacingFrameState_;
         pacingFrameReady_ = false;
+        pacingFailed_ = false;
         return true;
     }
+
+    if (pacingInFlight_ || pacingWaitRequested_) {
+        // Never invoke xrWaitFrame synchronously while pacing thread still owns an in-flight/pending wait (HIGH-09)
+        outPacingBusyOrFailed = true;
+        return false;
+    }
+
+    if (pacingFailed_) {
+        // Previous xrWaitFrame failed; schedule a retry for next Present without double-calling synchronously
+        pacingFailed_ = false;
+        pacingWaitRequested_ = true;
+        outPacingBusyOrFailed = true;
+        lock.unlock();
+        cvPacingRequest_.notify_one();
+        return false;
+    }
+
     return false;
 }
 
 void OpenXRFrameSubmitter::TriggerNextPacingWait(XrSession session) {
     {
         std::lock_guard<std::mutex> lock(pacingMutex_);
+        if (!pacingRunning_.load(std::memory_order_acquire)) return;
         pacingSession_ = session;
         pacingWaitRequested_ = true;
     }
@@ -109,9 +146,14 @@ bool OpenXRFrameSubmitter::WaitAndBeginFrame(XrSession session) {
     EnsurePacingThreadRunning(session);
 
     XrFrameState frameState{XR_TYPE_FRAME_STATE};
-    bool gotPacedState = ConsumePacedFrameState(session, frameState);
+    bool pacingBusyOrFailed = false;
+    bool gotPacedState = ConsumePacedFrameState(session, frameState, pacingBusyOrFailed);
     if (!gotPacedState) {
-        // Synchronous fallback if pacing thread hasn't returned
+        if (pacingBusyOrFailed) {
+            if (healthMonitor_) healthMonitor_->RecordFrameDropped();
+            return false;
+        }
+        // Synchronous fallback ONLY when pacing thread is idle/stopped (no concurrent xrWaitFrame possible)
         state_ = SubmitterState::WAIT_FRAME;
         XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
         XrResult res = xrWaitFrame(session, &waitInfo, &frameState);
@@ -181,11 +223,26 @@ bool OpenXRFrameSubmitter::BeginAndAcquireDX11(
     XrPosef& outLeftPose, XrFovf& outLeftFov,
     XrPosef& outRightPose, XrFovf& outRightFov) 
 {
+    outLeftPose = lastLeftPose_;
+    outLeftFov = lastLeftFov_;
+    outRightPose = lastRightPose_;
+    outRightFov = lastRightFov_;
+
     if (!WaitAndBeginFrame(session)) return false;
 
-    if (!currentFrameState_.shouldRender) {
-        // App is not in focus or visible
-        return true; 
+    auto endEmptyFrame = [&]() {
+        state_ = SubmitterState::END_FRAME;
+        XrFrameEndInfo endInfo{XR_TYPE_FRAME_END_INFO};
+        endInfo.displayTime = currentFrameState_.predictedDisplayTime;
+        endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+        endInfo.layerCount = 0;
+        xrEndFrame(session, &endInfo);
+    };
+
+    if (!currentFrameState_.shouldRender || !swapchainManager) {
+        // App is not in focus/visible (or swapchain unavailable): pair xrEndFrame cleanly and skip render (HIGH-09)
+        endEmptyFrame();
+        return false;
     }
 
     // Locate views for head tracking
@@ -196,6 +253,7 @@ bool OpenXRFrameSubmitter::BeginAndAcquireDX11(
     uint32_t leftIndex = 0;
     uint32_t rightIndex = 0;
     if (!swapchainManager->AcquireImages(leftIndex, rightIndex)) {
+        endEmptyFrame();
         return false;
     }
     lastAcquiredLeftIndex_ = leftIndex;
@@ -205,6 +263,7 @@ bool OpenXRFrameSubmitter::BeginAndAcquireDX11(
     state_ = SubmitterState::WAIT_IMAGES;
     if (!swapchainManager->WaitImages()) {
         swapchainManager->ReleaseImages();
+        endEmptyFrame();
         return false;
     }
 
@@ -437,9 +496,16 @@ bool OpenXRFrameSubmitter::BeginAndAcquireDX12(
     XrPosef& outLeftPose, XrFovf& outLeftFov,
     XrPosef& outRightPose, XrFovf& outRightFov) 
 {
+    outLeftDest = nullptr;
+    outRightDest = nullptr;
+    outLeftPose = lastLeftPose_;
+    outLeftFov = lastLeftFov_;
+    outRightPose = lastRightPose_;
+    outRightFov = lastRightFov_;
+
     if (!WaitAndBeginFrame(session)) return false;
 
-    if (!currentFrameState_.shouldRender) {
+    if (!currentFrameState_.shouldRender || !swapchainManager) {
         state_ = SubmitterState::END_FRAME;
         XrFrameEndInfo endInfo{XR_TYPE_FRAME_END_INFO};
         endInfo.displayTime = currentFrameState_.predictedDisplayTime;
@@ -602,9 +668,16 @@ bool OpenXRFrameSubmitter::BeginAndAcquireVulkan(
     XrPosef& outLeftPose, XrFovf& outLeftFov,
     XrPosef& outRightPose, XrFovf& outRightFov) 
 {
+    outLeftDest = VK_NULL_HANDLE;
+    outRightDest = VK_NULL_HANDLE;
+    outLeftPose = lastLeftPose_;
+    outLeftFov = lastLeftFov_;
+    outRightPose = lastRightPose_;
+    outRightFov = lastRightFov_;
+
     if (!WaitAndBeginFrame(session)) return false;
 
-    if (!currentFrameState_.shouldRender) {
+    if (!currentFrameState_.shouldRender || !swapchainManager) {
         state_ = SubmitterState::END_FRAME;
         XrFrameEndInfo endInfo{XR_TYPE_FRAME_END_INFO};
         endInfo.displayTime = currentFrameState_.predictedDisplayTime;
@@ -765,6 +838,43 @@ void OpenXRFrameSubmitter::SetHudQuad(XrSwapchain swapchain, uint32_t width, uin
     hudQuadConfig_.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
     hudQuadConfig_.pose.position = {0.0f, 0.0f, -distance};
     hudQuadConfig_.size = {sizeX, sizeY};
+}
+
+void OpenXRFrameSubmitter::SetHudQuadAnchored(XrSwapchain swapchain, uint32_t width, uint32_t height, const XrPosef& headPose, bool recenter, float distance, float sizeX, float sizeY) {
+    bool wasEnabled = hudQuadConfig_.enabled;
+    hudQuadConfig_.enabled = (swapchain != XR_NULL_HANDLE && width > 0 && height > 0);
+    hudQuadConfig_.swapchain = swapchain;
+    hudQuadConfig_.width = width;
+    hudQuadConfig_.height = height;
+    hudQuadConfig_.size = {sizeX, sizeY};
+
+    if (hudQuadConfig_.enabled && (recenter || !wasEnabled)) {
+        float x = headPose.orientation.x;
+        float y = headPose.orientation.y;
+        float z = headPose.orientation.z;
+        float w = headPose.orientation.w;
+
+        // Forward vector (-Z rotated by head orientation) leveled onto horizontal X-Z plane
+        float vx = -2.0f * (x * z + y * w);
+        float vz = -(1.0f - 2.0f * (x * x + y * y));
+        float len = std::sqrt(vx * vx + vz * vz);
+        if (len < 0.001f) {
+            vx = 0.0f;
+            vz = -1.0f;
+        } else {
+            vx /= len;
+            vz /= len;
+        }
+
+        float yaw = std::atan2(-vx, -vz);
+        float halfYaw = yaw * 0.5f;
+        hudQuadConfig_.pose.orientation = {0.0f, std::sin(halfYaw), 0.0f, std::cos(halfYaw)};
+        hudQuadConfig_.pose.position = {
+            headPose.position.x + vx * distance,
+            headPose.position.y,
+            headPose.position.z + vz * distance
+        };
+    }
 }
 
 void OpenXRFrameSubmitter::ClearHudQuad() {

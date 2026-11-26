@@ -83,13 +83,17 @@ void PageScanner::StartDynamicScan(float targetFov) {
 }
 
 void PageScanner::StopDynamicScan() {
-    if (m_scanRunning) {
-        m_scanRunning = false;
-        // Wake the scanner thread in case it's blocked on the condition variable
-        m_wakeCv.notify_all();
-        if (m_scanThread.joinable()) {
-            m_scanThread.join();
+    {
+        // Hold m_sleepMutex while clearing m_scanRunning to eliminate lost-wakeup race on 30s deep sleep (MED-02)
+        std::lock_guard<std::mutex> lk(m_sleepMutex);
+        if (!m_scanRunning.load(std::memory_order_acquire) && !m_scanThread.joinable()) {
+            return;
         }
+        m_scanRunning.store(false, std::memory_order_release);
+    }
+    m_wakeCv.notify_all();
+    if (m_scanThread.joinable()) {
+        m_scanThread.join();
         LOG_INFO("PageScanner: Async dynamic scan thread stopped.");
     }
 }
@@ -225,7 +229,11 @@ void PageScanner::NotifyCameraLocked() {
 }
 
 void PageScanner::NotifyCameraLost() {
-    bool wasLocked = m_cameraLocked.exchange(false, std::memory_order_acq_rel);
+    bool wasLocked = false;
+    {
+        std::lock_guard<std::mutex> lk(m_sleepMutex);
+        wasLocked = m_cameraLocked.exchange(false, std::memory_order_acq_rel);
+    }
     if (wasLocked) {
         LOG_INFO("PageScanner: Camera tracking lost. Waking scanner for revalidation.");
         m_wakeCv.notify_one();
@@ -324,9 +332,10 @@ void PageScanner::ScanDynamicHeaps() {
             bool isGuarded = (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0;
             bool isReadable = (mbi.Protect & (PAGE_READWRITE | PAGE_READONLY | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) != 0;
             if (mbi.State == MEM_COMMIT && !isGuarded && isReadable && 
-                (mbi.Type == MEM_PRIVATE || mbi.Type == MEM_MAPPED)) {
+                (mbi.Type == MEM_PRIVATE || mbi.Type == MEM_MAPPED) &&
+                mbi.RegionSize > sizeof(double) * 16) {
                 uint8_t* scanStart = static_cast<uint8_t*>(mbi.BaseAddress);
-                uint8_t* scanEnd = scanStart + mbi.RegionSize - sizeof(double) * 16;
+                uint8_t* scanEnd = scanStart + (mbi.RegionSize - sizeof(double) * 16);
                 
                 const size_t CHUNK_SIZE = 4096;
                 uint8_t buffer[CHUNK_SIZE];
@@ -379,7 +388,12 @@ void PageScanner::ScanDynamicHeaps() {
                 }
             }
             
-            currentAddress = static_cast<uint8_t*>(mbi.BaseAddress) + mbi.RegionSize;
+            const uintptr_t baseAddr = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+            const uintptr_t nextAddr = baseAddr + mbi.RegionSize;
+            if (nextAddr <= reinterpret_cast<uintptr_t>(currentAddress) || nextAddr < baseAddr) {
+                break; // Guard against address-space wraparound (MED-02)
+            }
+            currentAddress = reinterpret_cast<uint8_t*>(nextAddr);
             std::this_thread::yield();
         }
 

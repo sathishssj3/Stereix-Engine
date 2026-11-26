@@ -1,12 +1,15 @@
 import { execFile, execSync } from 'child_process';
+import crypto from 'crypto';
 import path from 'path';
 
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Bypass CLI auth
-process.env.NEXVR_AUTH_TOKEN = 'internal_agent_bypass';
+// Ensure a high-entropy per-invocation authorization token is set
+if (!process.env.STEREIX_AUTH_TOKEN) {
+    process.env.STEREIX_AUTH_TOKEN = crypto.randomUUID();
+}
 
 const cliTarget = path.join(__dirname, '..', 'build', 'bin', 'vr-inject-cli.exe');
 const dllTarget = path.join(__dirname, '..', 'build', 'bin', 'vrinject.dll');

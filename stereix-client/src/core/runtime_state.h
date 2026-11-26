@@ -25,7 +25,7 @@ public:
     }
 
     void OnDllProcessAttach(void* hModule);
-    void OnDllProcessDetach();
+    void OnDllProcessDetach(bool processTerminating = false);
     
     RuntimePhase GetPhase() const { return m_phase.load(); }
     void* GetModuleHandle() const { return m_hModule; }
@@ -36,12 +36,13 @@ public:
 private:
     RuntimeState() : m_phase(RuntimePhase::Uninitialized), m_hModule(nullptr) {}
 
+    static unsigned long __stdcall InitThreadProc(void* param);
     void BackgroundInitialize();
     void BackgroundTeardown();
 
     std::atomic<RuntimePhase> m_phase;
     void* m_hModule;
-    std::thread m_workerThread;
+    std::atomic<void*> m_stopEvent{nullptr};
     
     std::mutex m_stateMutex;
     std::condition_variable m_stateCv;

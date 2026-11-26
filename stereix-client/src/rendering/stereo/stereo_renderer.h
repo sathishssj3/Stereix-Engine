@@ -61,10 +61,22 @@ struct StereoShaderConstants {
     float _pad1;
     float _pad2;
 
-    // Remaining padding to reach exactly 512 bytes
-    // Chunk 0 = 256 bytes. Chunk 1 = 12 floats × 4 = 48 bytes. Need 256 − 48 = 208 bytes = 52 floats padding.
-    float _reserved[52];
+    // OpenXR Per-Eye Asymmetric FOV Tangents & Stereo Calibration (64 bytes, 16-byte aligned)
+    float leftEyeFovTan[4];          // (tanLeft, tanRight, tanDown, tanUp)
+    float rightEyeFovTan[4];         // (tanLeft, tanRight, tanDown, tanUp)
+    float gameTanHalfFovX;           // Game symmetric horizontal half-FOV tangent
+    float gameTanHalfFovY;           // Game symmetric vertical half-FOV tangent
+    float stereoIpd;                 // Inter-pupillary distance (meters)
+    float stereoConvergence;         // Focal / depth comfort distance (meters)
+    uint32_t isReversedZ;            // 1 = reverse-Z (1 near, 0 far), 0 = standard-Z
+    uint32_t isLeftHanded;           // 1 = LH (+Z fwd), 0 = RH (-Z fwd)
+    float nearPlane;                 // Camera near plane (meters)
+    float farPlane;                  // Camera far plane (meters)
+
+    // Remaining padding to reach exactly 512 bytes (368 + 144 = 512)
+    float _reserved[36];
 };
+static_assert(sizeof(StereoShaderConstants) == 512, "StereoShaderConstants must be 512 bytes");
 
 class StereoRenderer {
 public:

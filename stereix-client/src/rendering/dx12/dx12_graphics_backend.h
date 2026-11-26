@@ -20,6 +20,7 @@ public:
 
     bool Initialize(void* nativeDevice, void* nativeContext) override;
     void Shutdown() override;
+    void ReleaseResources() override;
 
     void SetState(StereoRendererState state) override;
     StereoRendererState GetState() const override;
@@ -82,6 +83,7 @@ private:
 
     ID3D12Resource* m_oxrLeftDest = nullptr;
     ID3D12Resource* m_oxrRightDest = nullptr;
+    ID3D12Resource* m_oxrHudDest = nullptr;
 };
 
 } // namespace vrinject

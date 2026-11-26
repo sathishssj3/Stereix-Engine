@@ -5,15 +5,20 @@ import { ReleaseChannel } from '@prisma/client';
 
 const updateService = new UpdateService();
 
+const safeReleaseKeySchema = z
+  .string()
+  .regex(/^releases\/[a-zA-Z0-9._/-]{1,256}$/, 'Key must start with releases/ and use safe path characters')
+  .refine((k) => !k.includes('..') && !k.includes('//') && !k.includes('\\'), 'Path traversal is not allowed');
+
 const publishReleaseSchema = z.object({
   version: z.string().regex(/^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/),
   channel: z.nativeEnum(ReleaseChannel).default(ReleaseChannel.STABLE),
-  releaseNotes: z.string().optional(),
+  releaseNotes: z.string().max(4000).optional(),
   isMandatory: z.boolean().default(false),
-  installerKey: z.string().min(1),
-  cliKey: z.string().optional(),
-  dllKey: z.string().optional(),
-  sha256Hash: z.string().length(64),
+  installerKey: safeReleaseKeySchema,
+  cliKey: safeReleaseKeySchema.optional(),
+  dllKey: safeReleaseKeySchema.optional(),
+  sha256Hash: z.string().regex(/^[0-9a-fA-F]{64}$/),
 });
 
 export class UpdateController {

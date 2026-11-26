@@ -56,11 +56,26 @@ struct DX12StereoShaderConstants {
     float _pad1;
     float _pad2;
 
-    float _reserved[52];
+    float leftEyeFovTan[4];
+    float rightEyeFovTan[4];
+    float gameTanHalfFovX;
+    float gameTanHalfFovY;
+    float stereoIpd;
+    float stereoConvergence;
+    uint32_t isReversedZ;
+    uint32_t isLeftHanded;
+    float nearPlane;
+    float farPlane;
+
+    float _reserved[36];
 };
+static_assert(sizeof(DX12StereoShaderConstants) == 512, "DX12StereoShaderConstants must be 512 bytes");
 
 class DX12StereoResourceManager {
 public:
+    static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
+    static constexpr uint32_t DESCRIPTORS_PER_FRAME = 5; // 1 CBV + 2 SRV (Cam, Depth) + 2 UAV (Left, Right)
+
     DX12StereoResourceManager() = default;
     ~DX12StereoResourceManager();
 
@@ -73,14 +88,17 @@ public:
     // Binds the necessary heaps to the command list
     void BindDescriptorHeaps(ID3D12GraphicsCommandList* commandList);
 
-    // Updates CBV and shader resource views for the current frame
+    // Updates CBV and shader resource views for the specified in-flight frame ring slot (HIGH-08)
     void UpdateFrameResources(
         ID3D12Device* device, 
         const EyeView& leftEye,
         const EyeView& rightEye,
         const CameraSnapshot& cam, 
         const DepthSnapshot& depth,
-        bool shouldAttemptStereo);
+        bool shouldAttemptStereo,
+        uint32_t frameSlot = 0);
+
+    uint32_t GetActiveFrameSlot() const { return m_activeFrameSlot; }
 
     // Target format negotiation (matches OpenXR swapchain)
     void SetTargetFormat(DXGI_FORMAT format);
@@ -127,6 +145,7 @@ private:
     // Descriptor Heaps
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_cbvSrvUavHeap;
     UINT m_descriptorSize = 0;
+    uint32_t m_activeFrameSlot = 0;
 
     mutable std::mutex m_mutex;
 
@@ -134,7 +153,7 @@ private:
     bool CreateDescriptorHeaps();
     bool CreateConstantBuffer();
     
-    void UpdateViews(const CameraSnapshot& cam, const DepthSnapshot& depth);
+    void UpdateViews(const CameraSnapshot& cam, const DepthSnapshot& depth, uint32_t frameSlot);
     
     CutsceneDetector m_cutsceneDetector;
     ComfortVignetteCalculator m_vignetteCalculator;

@@ -1,5 +1,9 @@
 #include "core/frame_coordinator.h"
+#include <atomic>
+#include <chrono>
+#include <mutex>
 #include <system_error>
+#include <thread>
 #include <vector>
 #include "rendering/dx11/dx11_graphics_backend.h"
 #include "rendering/dx12/dx12_graphics_backend.h"
@@ -28,6 +32,38 @@
 #include "ai/backend/vulkan_ai_backend.h"
 
 namespace vrinject {
+
+struct FrameCoordinatorOxrInitState {
+  std::mutex runtimeMutex;
+  std::unique_ptr<openxr::OpenXRRuntimeManager> pendingRuntime;
+  std::thread initThread;
+  std::atomic<bool> initInProgress{false};
+  std::atomic<bool> shuttingDown{false};
+  std::chrono::steady_clock::time_point lastInitAttempt{};
+  bool overlayInitialized = false;
+};
+
+FrameCoordinator::FrameCoordinator()
+    : m_oxrInitState(std::make_unique<FrameCoordinatorOxrInitState>()) {}
+
+FrameCoordinator::~FrameCoordinator() {
+  if (m_oxrInitState) {
+    m_oxrInitState->shuttingDown.store(true, std::memory_order_release);
+    if (m_oxrInitState->initThread.joinable()) {
+      m_oxrInitState->initThread.join();
+    }
+  }
+  if (m_oxrSubmitter) {
+    m_oxrSubmitter->BeginShutdown();
+  }
+  m_oxrSwapchain.reset();
+  m_oxrRuntime.reset();
+  if (m_oxrInitState) {
+    std::lock_guard<std::mutex> lock(m_oxrInitState->runtimeMutex);
+    m_oxrInitState->pendingRuntime.reset();
+  }
+  m_oxrSubmitter.reset();
+}
 
 void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
   if (m_frameActive) {
@@ -83,22 +119,14 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
     LOG_INFO("[STATUS] VR Session Active — Frame %llu (1920x1080 @ 90 FPS)", m_globalFrameCounter);
   }
 
-  // Initialize OverlayManager on first frame with window HWND
-  static bool s_overlayInitialized = false;
-  if (!s_overlayInitialized) {
-      HWND hwnd = nullptr;
-      if (m_currentSnapshot.nativeSwapchain) {
-          IDXGISwapChain* sc = reinterpret_cast<IDXGISwapChain*>(m_currentSnapshot.nativeSwapchain);
-          DXGI_SWAP_CHAIN_DESC desc = {};
-          if (SUCCEEDED(sc->GetDesc(&desc))) {
-              hwnd = desc.OutputWindow;
-          }
-      }
+  // Initialize OverlayManager on first frame using backend-populated nativeHwnd (CRIT-04: never cast VkSwapchainKHR to IDXGISwapChain*)
+  if (m_oxrInitState && !m_oxrInitState->overlayInitialized) {
+      HWND hwnd = reinterpret_cast<HWND>(m_currentSnapshot.nativeHwnd);
       OverlayManager::GetInstance().Initialize(hwnd);
       if (hwnd) {
           InputHook::GetInstance().SetTargetHwnd(hwnd);
       }
-      s_overlayInitialized = true;
+      m_oxrInitState->overlayInitialized = true;
   }
 
   // Keyboard shortcut toggle for In-Headset Dashboard (HOME, INSERT, F11)
@@ -329,34 +357,41 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
   }
 
   // Consume any newly initialized OpenXR runtime safely on the render thread
-  {
-    std::lock_guard<std::mutex> lock(m_oxrRuntimeMutex);
-    if (m_pendingOxrRuntime) {
-      m_oxrRuntime = std::move(m_pendingOxrRuntime);
+  if (m_oxrInitState) {
+    std::lock_guard<std::mutex> lock(m_oxrInitState->runtimeMutex);
+    if (m_oxrInitState->pendingRuntime) {
+      m_oxrRuntime = std::move(m_oxrInitState->pendingRuntime);
     }
   }
 
-  static std::atomic<bool> s_oxrInitInProgress{false};
-  if (!m_oxrRuntime || m_oxrRuntime->GetState() == openxr::RuntimeState::FAILED) {
-    if (!s_oxrInitInProgress.load()) {
-      static auto s_lastAttempt = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+  if (m_oxrInitState && (!m_oxrRuntime || m_oxrRuntime->GetState() == openxr::RuntimeState::FAILED)) {
+    if (!m_oxrInitState->initInProgress.load(std::memory_order_acquire) &&
+        !m_oxrInitState->shuttingDown.load(std::memory_order_acquire)) {
       auto now = std::chrono::steady_clock::now();
-      if (std::chrono::duration_cast<std::chrono::seconds>(now - s_lastAttempt).count() >= 2) {
-        s_lastAttempt = now;
-        s_oxrInitInProgress.store(true);
+      if (m_oxrInitState->lastInitAttempt.time_since_epoch().count() == 0 ||
+          std::chrono::duration_cast<std::chrono::seconds>(now - m_oxrInitState->lastInitAttempt).count() >= 2) {
+        if (m_oxrInitState->initThread.joinable()) {
+          m_oxrInitState->initThread.join();
+        }
+        m_oxrInitState->lastInitAttempt = now;
+        m_oxrInitState->initInProgress.store(true, std::memory_order_release);
         GraphicsBackend backend = m_currentSnapshot.backend;
-        std::thread([this, backend]() {
+        auto* initState = m_oxrInitState.get();
+        auto* healthMonitor = m_oxrHealthMonitor.get();
+        initState->initThread = std::thread([initState, healthMonitor, backend]() {
           LOG_INFO("FrameCoordinator: Async OpenXR initialization background thread started...");
-          auto runtime = std::make_unique<openxr::OpenXRRuntimeManager>(m_oxrHealthMonitor.get());
-          if (runtime->Initialize("NexVR Engine", backend)) {
+          auto runtime = std::make_unique<openxr::OpenXRRuntimeManager>(healthMonitor);
+          if (!initState->shuttingDown.load(std::memory_order_acquire) && runtime->Initialize("Stereix Engine", backend)) {
             LOG_INFO("FrameCoordinator: Async OpenXR initialization SUCCEEDED (state=%d)!", (int)runtime->GetState());
-            std::lock_guard<std::mutex> lock(m_oxrRuntimeMutex);
-            m_pendingOxrRuntime = std::move(runtime);
+            std::lock_guard<std::mutex> lock(initState->runtimeMutex);
+            if (!initState->shuttingDown.load(std::memory_order_acquire)) {
+              initState->pendingRuntime = std::move(runtime);
+            }
           } else {
             LOG_ERROR("FrameCoordinator: Async OpenXR initialization FAILED. Will retry in background in 2s.");
           }
-          s_oxrInitInProgress.store(false);
-        }).detach();
+          initState->initInProgress.store(false, std::memory_order_release);
+        });
       }
     }
   }
@@ -422,6 +457,12 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
             m_oxrSwapchain.reset();
         }
       }
+      if (!m_oxrSwapchain) {
+        m_stateMonitor.UpdateStereoHealth(false);
+        m_stateMonitor.UpdateOpenXrHealth(false);
+        return;
+      }
+
       if (!m_oxrSubmitter) {
         m_oxrSubmitter = std::make_unique<openxr::OpenXRFrameSubmitter>(
             m_oxrHealthMonitor.get());
@@ -462,6 +503,14 @@ void FrameCoordinator::OnPresentBegin(const RenderFrameSnapshot &snapshot) {
       );
 
       m_cachedHeadsetPose = m_currentSnapshot.leftPose;
+      m_cachedHeadsetPose.position.x = 0.5f * (m_currentSnapshot.leftPose.position.x + m_currentSnapshot.rightPose.position.x);
+      m_cachedHeadsetPose.position.y = 0.5f * (m_currentSnapshot.leftPose.position.y + m_currentSnapshot.rightPose.position.y);
+      m_cachedHeadsetPose.position.z = 0.5f * (m_currentSnapshot.leftPose.position.z + m_currentSnapshot.rightPose.position.z);
+
+      // Drive native game camera head-look when in active 3D gameplay (paused in menus & overlay)
+      m_inputManager.UpdateHeadTracking(
+          m_cachedHeadsetPose,
+          m_lastCompatibility.shouldAttemptStereo || camSnapshot.IsValid());
 
       m_stateMonitor.UpdateOpenXrHealth(true);
     } else {

@@ -426,6 +426,123 @@ test.describe('Cross-game isolation and profile safety regression tests', () => 
     expect(appTsx).toContain('Math.min(30, Math.max(15, sec))');
     expect(appTsx).toContain('[AI-PROCESS] Initializing local neural reverse-engineering engine');
   });
+
+  test('v0.1.121 BUG-33: deploy-before-launch, already-running attach, PID stabilization, and CLI error surfacing', () => {
+    const injectionMgr = readRepoFile('launcher', 'electron', 'injectionManager.ts');
+    const appTsx = readRepoFile('launcher', 'src', 'App.tsx');
+
+    // 1. Target exe resolution & asset deployment happen BEFORE game launch
+    const resolveIdx = injectionMgr.indexOf('Step 1: Resolve target executable BEFORE launching');
+    const alreadyRunningIdx = injectionMgr.indexOf('const alreadyRunning = await findRunningGameCandidate');
+    const deployCfgIdx = injectionMgr.indexOf('fs.writeFileSync(rootConfigPath');
+    const launchIdx = injectionMgr.indexOf('steam://rungameid/');
+    expect(resolveIdx).toBeGreaterThan(-1);
+    expect(alreadyRunningIdx).toBeGreaterThan(resolveIdx);
+    expect(deployCfgIdx).toBeGreaterThan(alreadyRunningIdx);
+    expect(launchIdx).toBeGreaterThan(deployCfgIdx);
+
+    // 2. Attaches cleanly without relaunching if already running
+    expect(injectionMgr).toContain('attaching without relaunching');
+
+    // 3. Stabilizes PID & waits for window/memory readiness before UAC + re-resolves PID post-UAC
+    expect(injectionMgr).toContain('windowAndMemReady');
+    expect(injectionMgr).toContain('stableDurationMs');
+    expect(injectionMgr).toContain('Re-resolved live game PID after UAC');
+
+    // 4. Flushes watched logs and surfaces exact vr-inject-cli failure line in UI log
+    expect(injectionMgr).toContain('extractCliFailureReason');
+    expect(injectionMgr).toContain('flushWatchedLogs(event)');
+    expect(appTsx).toContain('const pendingLines = logQueueRef.current.splice(0, logQueueRef.current.length);');
+  });
+
+  test('v0.1.122 SEC-01..SEC-12: security, stability, OTA integrity, and binary hardening invariants', () => {
+    const injectionMgr = readRepoFile('launcher', 'electron', 'injectionManager.ts');
+    const diagnosticsMgr = readRepoFile('launcher', 'electron', 'diagnosticsManager.ts');
+    const aiProfileSvc = readRepoFile('launcher', 'electron', 'aiProfileService.ts');
+    const utilsTs = readRepoFile('launcher', 'electron', 'utils.ts');
+    const updateMgr = readRepoFile('launcher', 'electron', 'updateManager.ts');
+    const configMgr = readRepoFile('launcher', 'electron', 'configManager.ts');
+    const libraryMgr = readRepoFile('launcher', 'electron', 'libraryManager.ts');
+    const telemetryMgr = readRepoFile('launcher', 'electron', 'telemetryManager.ts');
+    const mainTs = readRepoFile('launcher', 'electron', 'main.ts');
+    const appTsx = readRepoFile('launcher', 'src', 'App.tsx');
+    const builderCfg = readRepoFile('launcher', 'electron-builder.config.js');
+    const launcherPkg = JSON.parse(readRepoFile('launcher', 'package.json'));
+    const frameCoord = readRepoFile('src', 'core', 'frame_coordinator.cpp');
+    const vulkanBackend = readRepoFile('src', 'rendering', 'vulkan', 'vulkan_graphics_backend.cpp');
+    const inputHook = readRepoFile('src', 'hooks', 'input_hook.cpp');
+    const injectorMain = readRepoFile('src', 'injector', 'main.cpp');
+    const compilerFlags = readRepoFile('cmake', 'CompilerFlags.cmake');
+    const cmakeLists = readRepoFile('CMakeLists.txt');
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    const scriptsDir = path.join(repoRoot, 'scripts');
+    const syncAssets = fs.readFileSync(path.join(scriptsDir, 'sync_assets.js'), 'utf-8');
+    const pkgWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'package-setup.yml'), 'utf-8');
+    const releaseWorkflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'release.yml'), 'utf-8');
+
+    // CRIT-07: Never hardcode live NVIDIA NIM API keys in any script (safe even when untracked scripts are absent in CI)
+    for (const fileName of fs.readdirSync(scriptsDir)) {
+      if (/\.(m?js|ts|ps1|py)$/i.test(fileName)) {
+        const content = fs.readFileSync(path.join(scriptsDir, fileName), 'utf-8');
+        expect(content, `Hardcoded NVIDIA NIM key found in scripts/${fileName}`).not.toMatch(/nvapi-[A-Za-z0-9_-]{16,}/);
+      }
+    }
+
+    // CRIT-01 / CRIT-02: Elevated injector uses --job-file (no single-quote path interpolation or command-line auth tokens)
+    expect(injectionMgr).toContain('--job-file');
+    expect(injectionMgr).not.toContain("str.replace(/'/g");
+    expect(diagnosticsMgr).not.toContain("replace(/'/g");
+    expect(injectorMain).toContain('ValidateAuthToken');
+    expect(injectorMain).toContain('IsAllowedCallerImagePath');
+    expect(injectorMain).toContain('IsReparsePointPath');
+    expect(injectorMain).toContain('VerifyFinalHandlePathSafe');
+    expect(injectorMain).toContain('OpenSafeOutputFileHandle');
+    // Log file MUST be opened strictly AFTER auth token and caller verification
+    expect(injectorMain.indexOf('OpenSafeOutputFileHandle(job.logPath')).toBeGreaterThan(
+      injectorMain.indexOf('IsAllowedCallerImagePath')
+    );
+
+    // CRIT-03: Pre-hash signing order + hard CI & sync_assets hash-match enforcement (UTF-16LE)
+    expect(cmakeLists).toContain('EXPECTED_ONNXRUNTIME_HASH');
+    expect(syncAssets).toContain('verifyEmbeddedDllHash');
+    expect(syncAssets).toContain('FATAL CRIT-03');
+    expect(releaseWorkflow).toContain('[Text.Encoding]::Unicode');
+    expect(releaseWorkflow).not.toContain('::warning::DLL hash mismatch');
+    expect(pkgWorkflow).toContain('INPUT_RELEASE_TAG');
+    expect(pkgWorkflow).not.toContain('inputs.release_tag }}"');
+
+    // CRIT-04: FrameCoordinator uses nativeHwnd, never casts nativeSwapchain to IDXGISwapChain*
+    expect(frameCoord).toContain('m_currentSnapshot.nativeHwnd');
+    expect(frameCoord).not.toContain('static_cast<IDXGISwapChain*>(m_currentSnapshot.nativeSwapchain)');
+
+    // CRIT-05 / HIGH-14: aiProfileService authorization + Object.create(null) maps + prototype key rejection
+    expect(aiProfileSvc).toContain('resolveAuthorizedGamePaths');
+    expect(utilsTs).toContain('Object.create(null)');
+    expect(utilsTs).toContain('__proto__');
+
+    // HIGH-01 / MED-12: Electron fuses configured, sandbox enabled by default, react not in runtime dependencies
+    expect(builderCfg).toContain('electronFuses');
+    expect(builderCfg).toContain('runAsNode: false');
+    expect(builderCfg).toContain('onlyLoadAppFromAsar: true');
+    expect(mainTs).toContain('sandbox: true');
+    expect(launcherPkg.dependencies?.react).toBeUndefined();
+    expect(launcherPkg.dependencies?.['react-dom']).toBeUndefined();
+
+    // HIGH-04 / HIGH-07 / MED-01: VR mirror allowlist, full 512-byte Vulkan UBO, binary hardening flags
+    expect(inputHook).toContain('IsVerifiedVrMirrorWindow');
+    expect(vulkanBackend).toContain('sizeof(StereoShaderConstants)');
+    expect(compilerFlags).toContain('/guard:ehcont');
+    expect(cmakeLists).toContain('/CETCOMPAT');
+
+    // HIGH-10 / HIGH-11 / HIGH-13 / MED-03..MED-06: Atomic OTA staging, abort/close routing, profile precedence, sanitized telemetry
+    expect(updateMgr).toContain('.staging_');
+    expect(updateMgr).toContain('hasUntrustedArtifacts');
+    expect(configMgr).toContain('localDirsLowToHigh');
+    expect(configMgr).not.toContain('Auto-heal legacy vrinject.json where srgbCorrection was set to false');
+    expect(libraryMgr).toContain('hydrateGameMapsFromEntries');
+    expect(telemetryMgr).toContain('sanitizeTelemetry(payload.message');
+    expect(appTsx).toContain("injectState === 'ready' || injectState === 'injecting' || injectState === 'running'");
+  });
 });
 
 

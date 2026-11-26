@@ -10,8 +10,8 @@ const __dirname = path.dirname(__filename);
 const launcherDir = path.resolve(__dirname, '..');
 
 const candidateDirs = [
-  path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'launcher'),
   path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'Stereix Engine'),
+  path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'launcher'),
   path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'NexVR Engine'),
   path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Stereix Engine'),
   path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'NexVR Engine'),
@@ -29,6 +29,11 @@ if (!installedAsarPath || !fs.existsSync(installedAsarPath)) {
   process.exit(0);
 }
 
+// HIGH-01 Warning: Repacking app.asar in place invalidates Electron Embedded ASAR Integrity Validation
+console.warn('[PatchLauncher] WARNING: Production builds enable Electron EnableEmbeddedAsarIntegrityValidation.');
+console.warn('[PatchLauncher] Modifying app.asar in-place will fail ASAR integrity verification on fuse-hardened builds.');
+console.warn('[PatchLauncher] For fuse-hardened packaged builds, rebuild the installer via `npm run pack` instead.');
+
 // 1. Kill any running Stereix / NexVR Engine instance so file handles are unlocked
 try {
   if (process.platform === 'win32') {
@@ -43,7 +48,7 @@ try {
 await new Promise(r => setTimeout(r, 500));
 
 // 2. Extract installed app.asar to temporary directory
-const tempExtractDir = path.join(os.tmpdir(), `nexvr_asar_patch_${Date.now()}`);
+const tempExtractDir = path.join(os.tmpdir(), `stereix_asar_patch_${Date.now()}`);
 fs.mkdirSync(tempExtractDir, { recursive: true });
 console.log(`[PatchLauncher] Extracting existing app.asar to ${tempExtractDir}...`);
 asar.extractAll(installedAsarPath, tempExtractDir);
@@ -77,7 +82,7 @@ await asar.createPackage(tempExtractDir, installedAsarPath);
 const rootDir = path.resolve(launcherDir, '..', '..');
 const updatesDir = path.join(
   process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-  'NexVR Engine',
+  'Stereix Engine',
   'updates'
 );
 
@@ -114,4 +119,4 @@ try {
   }
 } catch {}
 
-console.log('[PatchLauncher] Successfully patched installed NexVR Engine launcher!');
+console.log('[PatchLauncher] Successfully patched installed Stereix Engine launcher!');

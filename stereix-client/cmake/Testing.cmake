@@ -2,7 +2,7 @@ enable_testing()
 
 function(add_nexvr_gtest target source)
     add_executable(${target} ${source})
-    target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR} ${Vulkan_INCLUDE_DIRS} ${OPENXR_INCLUDE_DIR})
+    target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR} ${Vulkan_INCLUDE_DIRS} ${OPENXR_INCLUDE_DIR} ${JSON_INCLUDE_DIR})
     target_link_libraries(${target} PRIVATE NexVRCore gtest_main gmock Vulkan::Vulkan)
     add_test(NAME ${target} COMMAND ${target})
 endfunction()

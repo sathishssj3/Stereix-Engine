@@ -47,6 +47,8 @@ export interface VRConfig {
   aiInpainting?:           boolean;
   convergence?:            number;
   ipd?:                    number;
+  forceCinemaMode?:        boolean;
+  theaterDistance?:        number;
   aiNotes?:                string;
 }
 

@@ -31,10 +31,15 @@ extern HMODULE g_hModule; // Declared in dllmain.cpp
 namespace vrinject {
 namespace DX11Hook {
 
-static IDXGISwapChain* g_lastProbedSwapChain = nullptr;
+static std::atomic<uint64_t> g_swapchainProbeEpoch{1};
+static std::mutex g_swapchainProbeMutex;
+static uint64_t g_appliedProbeEpoch = 0;
+static IDXGISwapChain* g_probedSwapChain = nullptr;
+static bool g_probedIsDX12 = false;
+static int g_dx12FailCount = 0;
 
 void InvalidateCachedSwapchain() {
-    g_lastProbedSwapChain = nullptr;
+    g_swapchainProbeEpoch.fetch_add(1, std::memory_order_acq_rel);
 }
 
 typedef HRESULT(__stdcall* Present_t)(IDXGISwapChain*, UINT, UINT);
@@ -104,9 +109,14 @@ void VerifyHookIntegrity() {
 }
 
 template<typename SwapChainType, typename OriginalFunc, typename... Args>
-HRESULT ProcessPresent(SwapChainType* pSwapChain, OriginalFunc originalFunc, Args... args) {
+HRESULT ProcessPresent(SwapChainType* pSwapChain, OriginalFunc originalFunc, bool& originalCalled, HRESULT& outHr, Args... args) {
     if (!vrinject::seh::IsValidMemoryPointer(pSwapChain) || !originalFunc) {
-        return originalFunc ? originalFunc(pSwapChain, args...) : DXGI_ERROR_INVALID_CALL;
+        if (originalFunc) {
+            originalCalled = true;
+            outHr = originalFunc(pSwapChain, args...);
+            return outHr;
+        }
+        return DXGI_ERROR_INVALID_CALL;
     }
 
     // Only skip DX11 processing if Vulkan is ACTIVELY presenting frames.
@@ -117,59 +127,60 @@ HRESULT ProcessPresent(SwapChainType* pSwapChain, OriginalFunc originalFunc, Arg
     // actively presenting to a swapchain.
     auto vulkanState = vrinject::vulkan::VulkanLifecycleManager::Get().GetState();
     if (vulkanState == vrinject::RenderState::RUNNING) {
-        return originalFunc(pSwapChain, args...);
+        originalCalled = true;
+        outHr = originalFunc(pSwapChain, args...);
+        return outHr;
     }
 
     HRESULT hr = S_OK;
     try {
         // Execute original present first to get the true HRESULT (e.g. DEVICE_REMOVED)
+        originalCalled = true;
         hr = originalFunc(pSwapChain, args...);
+        outHr = hr;
 
-        // Determine if the swapchain is truly DX12 or DX11.
-        // Cache the result per swapchain pointer to avoid probing every frame.
-        // Self-healing: if DX12 path fails repeatedly, fall back to DX11.
-        static IDXGISwapChain* s_lastProbedSwapChain = nullptr;
-        static bool s_lastProbeWasDX12 = false;
-        static int s_dx12FailCount = 0;
-
-        // Sync with global invalidation
-        if (!g_lastProbedSwapChain) {
-            s_lastProbedSwapChain = nullptr;
-            s_lastProbeWasDX12 = false;
-            s_dx12FailCount = 0;
-            g_lastProbedSwapChain = (IDXGISwapChain*)1; // sentinel to indicate reset applied
-        }
-        
+        // Determine if the swapchain is truly DX12 or DX11 using shared file-scope state
+        // across both Present and Present1 template instantiations (MED-02).
         IDXGISwapChain* baseSwapChain = static_cast<IDXGISwapChain*>(pSwapChain);
-        
-        // Re-probe if swapchain pointer changed
-        if (baseSwapChain != s_lastProbedSwapChain) {
-            s_lastProbedSwapChain = baseSwapChain;
-            s_lastProbeWasDX12 = false;
-            s_dx12FailCount = 0;
-            
-            // Probe unconditionally: verify swapchain's actual buffer type (BUG-10)
-            Microsoft::WRL::ComPtr<ID3D12Resource> probe;
-            if (SUCCEEDED(baseSwapChain->GetBuffer(0, IID_PPV_ARGS(&probe)))) {
-                s_lastProbeWasDX12 = true;
-                LOG_INFO("DX11Hook: Swapchain %p verified as DX12 (has ID3D12Resource buffers)", baseSwapChain);
-                
-                // If command queue hasn't been captured via hooks yet, query it directly from the swapchain
-                if (!DXGIFactoryHook::GetCapturedCommandQueue().Get()) {
-                    Microsoft::WRL::ComPtr<ID3D12CommandQueue> scQueue;
-                    if (SUCCEEDED(baseSwapChain->GetDevice(IID_PPV_ARGS(&scQueue)))) {
-                        DXGIFactoryHook::SetCapturedCommandQueue(scQueue.Get());
-                        LOG_INFO("DX11Hook: Captured DX12 CommandQueue directly from swapchain: %p", scQueue.Get());
-                    }
-                }
-            } else {
-                LOG_INFO("DX11Hook: Swapchain %p verified as DX11 (buffers are not ID3D12Resource)", baseSwapChain);
+        bool useDX12 = false;
+        {
+            std::lock_guard<std::mutex> probeLock(g_swapchainProbeMutex);
+            const uint64_t currentEpoch = g_swapchainProbeEpoch.load(std::memory_order_acquire);
+            if (g_appliedProbeEpoch != currentEpoch) {
+                g_probedSwapChain = nullptr;
+                g_probedIsDX12 = false;
+                g_dx12FailCount = 0;
+                g_appliedProbeEpoch = currentEpoch;
             }
+
+            if (baseSwapChain != g_probedSwapChain) {
+                g_probedSwapChain = baseSwapChain;
+                g_probedIsDX12 = false;
+                g_dx12FailCount = 0;
+
+                // Probe unconditionally: verify swapchain's actual buffer type (BUG-10)
+                Microsoft::WRL::ComPtr<ID3D12Resource> probe;
+                if (SUCCEEDED(baseSwapChain->GetBuffer(0, IID_PPV_ARGS(&probe)))) {
+                    g_probedIsDX12 = true;
+                    LOG_INFO("DX11Hook: Swapchain %p verified as DX12 (has ID3D12Resource buffers)", baseSwapChain);
+
+                    // If command queue hasn't been captured via hooks yet, query it directly from the swapchain
+                    if (!DXGIFactoryHook::GetCapturedCommandQueue().Get()) {
+                        Microsoft::WRL::ComPtr<ID3D12CommandQueue> scQueue;
+                        if (SUCCEEDED(baseSwapChain->GetDevice(IID_PPV_ARGS(&scQueue)))) {
+                            DXGIFactoryHook::SetCapturedCommandQueue(scQueue.Get());
+                            LOG_INFO("DX11Hook: Captured DX12 CommandQueue directly from swapchain: %p", scQueue.Get());
+                        }
+                    }
+                } else {
+                    LOG_INFO("DX11Hook: Swapchain %p verified as DX11 (buffers are not ID3D12Resource)", baseSwapChain);
+                }
+            }
+            useDX12 = g_probedIsDX12 && (g_dx12FailCount < 60);
         }
-        
+
         RenderFrameSnapshot snapshot;
-        bool useDX12 = s_lastProbeWasDX12 && (s_dx12FailCount < 60);
-        
+
         if (useDX12) {
             Microsoft::WRL::ComPtr<ID3D12CommandQueue> capturedQueue;
             Microsoft::WRL::ComPtr<ID3D12CommandQueue> scQueue;
@@ -193,15 +204,20 @@ HRESULT ProcessPresent(SwapChainType* pSwapChain, OriginalFunc originalFunc, Arg
                  snapshot.state != RenderState::INITIALIZING &&
                  snapshot.state != RenderState::RESIZE_PENDING &&
                  snapshot.state != RenderState::REBUILDING_RESOURCES)) {
-                s_dx12FailCount++;
-                if (s_dx12FailCount >= 60) {
+                int failCount = 0;
+                {
+                    std::lock_guard<std::mutex> probeLock(g_swapchainProbeMutex);
+                    failCount = ++g_dx12FailCount;
+                }
+                if (failCount >= 60) {
                     LOG_WARN("DX11Hook: DX12 path failed %d times. Auto-falling back to DX11 for swapchain %p", 
-                             s_dx12FailCount, baseSwapChain);
+                             failCount, baseSwapChain);
                     // Reset DX11 lifecycle to pick up this swapchain fresh
                     Dx11LifecycleManager::Get().Reset();
                 }
             } else {
-                s_dx12FailCount = 0; // Reset on success
+                std::lock_guard<std::mutex> probeLock(g_swapchainProbeMutex);
+                g_dx12FailCount = 0; // Reset on success
             }
         }
         
@@ -217,8 +233,8 @@ HRESULT ProcessPresent(SwapChainType* pSwapChain, OriginalFunc originalFunc, Arg
         }
 
         // Periodically verify hook integrity to prevent external unhooking (e.g. by anti-cheats or overlays)
-        static int s_frameCount = 0;
-        if (++s_frameCount % 600 == 0) {
+        static std::atomic<int> s_frameCount{0};
+        if (s_frameCount.fetch_add(1, std::memory_order_relaxed) % 600 == 599) {
             VerifyHookIntegrity();
         }
 
@@ -234,45 +250,55 @@ HRESULT ProcessPresent(SwapChainType* pSwapChain, OriginalFunc originalFunc, Arg
 }
 
 
-static HRESULT hkPresentInternal(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
+static HRESULT hkPresentInternal(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags, bool& originalCalled, HRESULT& outHr) {
     UINT effectiveSyncInterval = SyncInterval;
     auto* coordinator = SubsystemContext::Get().GetFrameCoordinator();
     if (coordinator && coordinator->IsOpenXRReady()) {
         effectiveSyncInterval = 0; // Decouple from 60 Hz monitor VSync so OpenXR runs at full 90 Hz
     }
-    return ProcessPresent(pSwapChain, OriginalPresent, effectiveSyncInterval, Flags);
+    return ProcessPresent(pSwapChain, OriginalPresent, originalCalled, outHr, effectiveSyncInterval, Flags);
 }
 
 HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
+    bool originalCalled = false;
+    HRESULT outHr = DXGI_ERROR_INVALID_CALL;
     __try {
-        return hkPresentInternal(pSwapChain, SyncInterval, Flags);
+        return hkPresentInternal(pSwapChain, SyncInterval, Flags, originalCalled, outHr);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
-        LOG_ERROR("DX11Hook: SEH hardware exception intercepted in hkPresent! Safely routing to original driver Present.");
-        return OriginalPresent ? OriginalPresent(pSwapChain, SyncInterval, Flags) : DXGI_ERROR_INVALID_CALL;
+        LOG_ERROR("DX11Hook: SEH hardware exception intercepted in hkPresent! (originalCalled=%d)", originalCalled ? 1 : 0);
+        if (!originalCalled && OriginalPresent) {
+            return OriginalPresent(pSwapChain, SyncInterval, Flags);
+        }
+        return outHr;
     }
 }
 
-static HRESULT hkPresent1Internal(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters) {
+static HRESULT hkPresent1Internal(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters, bool& originalCalled, HRESULT& outHr) {
     UINT effectiveSyncInterval = SyncInterval;
     auto* coordinator = SubsystemContext::Get().GetFrameCoordinator();
     if (coordinator && coordinator->IsOpenXRReady()) {
         effectiveSyncInterval = 0; // Decouple from 60 Hz monitor VSync so OpenXR runs at full 90 Hz
     }
-    return ProcessPresent(pSwapChain, OriginalPresent1, effectiveSyncInterval, PresentFlags, pPresentParameters);
+    return ProcessPresent(pSwapChain, OriginalPresent1, originalCalled, outHr, effectiveSyncInterval, PresentFlags, pPresentParameters);
 }
 
 HRESULT __stdcall hkPresent1(IDXGISwapChain1* pSwapChain, UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS* pPresentParameters) {
+    bool originalCalled = false;
+    HRESULT outHr = DXGI_ERROR_INVALID_CALL;
     __try {
-        return hkPresent1Internal(pSwapChain, SyncInterval, PresentFlags, pPresentParameters);
+        return hkPresent1Internal(pSwapChain, SyncInterval, PresentFlags, pPresentParameters, originalCalled, outHr);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
-        LOG_ERROR("DX11Hook: SEH hardware exception intercepted in hkPresent1! Safely routing to original driver Present1.");
-        return OriginalPresent1 ? OriginalPresent1(pSwapChain, SyncInterval, PresentFlags, pPresentParameters) : DXGI_ERROR_INVALID_CALL;
+        LOG_ERROR("DX11Hook: SEH hardware exception intercepted in hkPresent1! (originalCalled=%d)", originalCalled ? 1 : 0);
+        if (!originalCalled && OriginalPresent1) {
+            return OriginalPresent1(pSwapChain, SyncInterval, PresentFlags, pPresentParameters);
+        }
+        return outHr;
     }
 }
 
-static HRESULT hkResizeBuffersInternal(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags) {
+static HRESULT hkResizeBuffersInternal(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags, bool& originalCalled, HRESULT& outHr) {
     if (OriginalResizeBuffers) {
         // CRITICAL: Release ALL our references to the swapchain's backbuffer
         // before calling ResizeBuffers. DXGI requires zero outstanding references
@@ -294,7 +320,9 @@ static HRESULT hkResizeBuffersInternal(IDXGISwapChain* pSwapChain, UINT BufferCo
             frameCoord->ReleaseGraphicsResources();
         }
 
+        originalCalled = true;
         HRESULT hr = OriginalResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+        outHr = hr;
         
         // Mark lifecycle for rebuild — it will re-acquire the backbuffer on next Present
         if (SUCCEEDED(hr)) {
@@ -308,12 +336,17 @@ static HRESULT hkResizeBuffersInternal(IDXGISwapChain* pSwapChain, UINT BufferCo
 }
 
 HRESULT __stdcall hkResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags) {
+    bool originalCalled = false;
+    HRESULT outHr = DXGI_ERROR_INVALID_CALL;
     __try {
-        return hkResizeBuffersInternal(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+        return hkResizeBuffersInternal(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags, originalCalled, outHr);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
-        LOG_ERROR("DX11Hook: SEH hardware exception intercepted in hkResizeBuffers! Safely forwarding to OriginalResizeBuffers.");
-        return OriginalResizeBuffers ? OriginalResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags) : DXGI_ERROR_INVALID_CALL;
+        LOG_ERROR("DX11Hook: SEH hardware exception intercepted in hkResizeBuffers! (originalCalled=%d)", originalCalled ? 1 : 0);
+        if (!originalCalled && OriginalResizeBuffers) {
+            return OriginalResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+        }
+        return outHr;
     }
 }
 
@@ -427,44 +460,57 @@ void __stdcall hkUpdateSubresource(ID3D11DeviceContext* pContext, ID3D11Resource
     }
 }
 
-HRESULT __stdcall hkMap(ID3D11DeviceContext* pContext, ID3D11Resource* pResource, UINT Subresource, D3D11_MAP MapType, UINT MapFlags, D3D11_MAPPED_SUBRESOURCE* pMappedResource) {
-    HRESULT hr = OriginalMap ? OriginalMap(pContext, pResource, Subresource, MapType, MapFlags, pMappedResource) : DXGI_ERROR_INVALID_CALL;
-    
-    if (SUCCEEDED(hr) && pMappedResource && pMappedResource->pData && pResource) {
-        D3D11_RESOURCE_DIMENSION dim;
-        pResource->GetType(&dim);
-        if (dim == D3D11_RESOURCE_DIMENSION_BUFFER) {
-            auto* pBuf = static_cast<ID3D11Buffer*>(pResource);
-            D3D11_BUFFER_DESC desc;
-            pBuf->GetDesc(&desc);
-            if (desc.BindFlags & D3D11_BIND_CONSTANT_BUFFER) {
-                std::lock_guard<std::mutex> lock(g_mappedBuffersMutex);
-                g_mappedBuffers[pResource] = { pMappedResource->pData, desc.ByteWidth };
+static void RecordMappedConstantBuffer(ID3D11Resource* pResource, void* pData) {
+    D3D11_RESOURCE_DIMENSION dim;
+    pResource->GetType(&dim);
+    if (dim == D3D11_RESOURCE_DIMENSION_BUFFER) {
+        auto* pBuf = static_cast<ID3D11Buffer*>(pResource);
+        D3D11_BUFFER_DESC desc;
+        pBuf->GetDesc(&desc);
+        if (desc.BindFlags & D3D11_BIND_CONSTANT_BUFFER) {
+            std::lock_guard<std::mutex> lock(g_mappedBuffersMutex);
+            constexpr size_t MAX_MAPPED_BUFFERS = 4096;
+            if (g_mappedBuffers.size() >= MAX_MAPPED_BUFFERS) {
+                g_mappedBuffers.clear();
             }
+            g_mappedBuffers[pResource] = { pData, desc.ByteWidth };
         }
     }
-    
+}
+
+HRESULT __stdcall hkMap(ID3D11DeviceContext* pContext, ID3D11Resource* pResource, UINT Subresource, D3D11_MAP MapType, UINT MapFlags, D3D11_MAPPED_SUBRESOURCE* pMappedResource) {
+    HRESULT hr = OriginalMap ? OriginalMap(pContext, pResource, Subresource, MapType, MapFlags, pMappedResource) : DXGI_ERROR_INVALID_CALL;
+
+    if (SUCCEEDED(hr) && pMappedResource && pMappedResource->pData && pResource) {
+        __try {
+            RecordMappedConstantBuffer(pResource, pMappedResource->pData);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
+
     return hr;
+}
+
+static bool PopMappedBufferEntry(ID3D11Resource* pResource, MappedBufferEntry& outEntry) {
+    std::lock_guard<std::mutex> lock(g_mappedBuffersMutex);
+    auto it = g_mappedBuffers.find(pResource);
+    if (it != g_mappedBuffers.end()) {
+        outEntry = it->second;
+        g_mappedBuffers.erase(it);
+        return true;
+    }
+    return false;
 }
 
 void __stdcall hkUnmap(ID3D11DeviceContext* pContext, ID3D11Resource* pResource, UINT Subresource) {
     if (pResource) {
         MappedBufferEntry entry{};
-        bool found = false;
-        {
-            std::lock_guard<std::mutex> lock(g_mappedBuffersMutex);
-            auto it = g_mappedBuffers.find(pResource);
-            if (it != g_mappedBuffers.end()) {
-                entry = it->second;
-                g_mappedBuffers.erase(it);
-                found = true;
-            }
-        }
-        if (found && entry.pData && entry.byteWidth >= sizeof(Matrix4x4)) {
-            auto* collector = SubsystemContext::Get().GetCandidateCollector();
-            if (collector) {
-                collector->OnConstantBufferUpdate(static_cast<ID3D11Buffer*>(pResource), entry.pData, entry.byteWidth);
-            }
+        if (PopMappedBufferEntry(pResource, entry) && entry.pData && entry.byteWidth >= sizeof(Matrix4x4)) {
+            __try {
+                auto* collector = SubsystemContext::Get().GetCandidateCollector();
+                if (collector) {
+                    collector->OnConstantBufferUpdate(static_cast<ID3D11Buffer*>(pResource), entry.pData, entry.byteWidth);
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
     }
     if (OriginalUnmap) {
@@ -473,11 +519,7 @@ void __stdcall hkUnmap(ID3D11DeviceContext* pContext, ID3D11Resource* pResource,
 }
 
 bool Initialize() {
-    MH_STATUS status = MH_Initialize();
-    if (status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED) {
-        LOG_ERROR("DX11Hook: MH_Initialize failed");
-        return false;
-    }
+    // BUG-01/02: HookManager owns MinHook lifecycle (no redundant MH_Initialize here).
 
     // Initialize Path and Config
     char dllPath[MAX_PATH] = {};
@@ -490,7 +532,8 @@ bool Initialize() {
         }
     }
 
-    // Create dummy window and swapchain to get vtables
+    // Create dummy window and swapchain to get vtables (suppress DXGIFactoryHook capture, HIGH-12)
+    DXGIFactoryHook::ScopedCaptureSuppression suppressCapture;
     WNDCLASSEXA wc = { sizeof(WNDCLASSEXA), CS_HREDRAW | CS_VREDRAW, DefWindowProcA, 0, 0, GetModuleHandle(nullptr), NULL, NULL, NULL, NULL, "VRInjectDummy", NULL };
     RegisterClassExA(&wc);
     HWND hwnd = CreateWindowExA(0, wc.lpszClassName, "Dummy", WS_OVERLAPPEDWINDOW, 0, 0, 100, 100, NULL, NULL, wc.hInstance, NULL);
@@ -567,7 +610,7 @@ bool Initialize() {
         std::string path(modName);
         size_t lastSlash = path.find_last_of("\\/");
         std::string filename = (lastSlash == std::string::npos) ? path : path.substr(lastSlash + 1);
-        auto toLower = [](std::string s) { for (auto& c : s) c = (char)tolower(c); return s; };
+        auto toLower = [](std::string s) { for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return s; };
         std::string filenameLower = toLower(filename);
         std::string pathLower = toLower(path);
         
@@ -699,19 +742,26 @@ bool Initialize() {
 void Shutdown() {
     Dx11LifecycleManager::Get().Shutdown();
 
-    if (g_targetPresent) { MH_DisableHook(g_targetPresent); g_targetPresent = nullptr; }
-    if (g_targetPresent1) { MH_DisableHook(g_targetPresent1); g_targetPresent1 = nullptr; }
-    if (g_targetResizeBuffers) { MH_DisableHook(g_targetResizeBuffers); g_targetResizeBuffers = nullptr; }
-    if (g_targetUpdateSubresource) { MH_DisableHook(g_targetUpdateSubresource); g_targetUpdateSubresource = nullptr; }
-    if (g_targetMap) { MH_DisableHook(g_targetMap); g_targetMap = nullptr; }
-    if (g_targetUnmap) { MH_DisableHook(g_targetUnmap); g_targetUnmap = nullptr; }
+    auto removeHook = [](void*& target) {
+        if (target) {
+            MH_DisableHook(target);
+            MH_RemoveHook(target);
+            target = nullptr;
+        }
+    };
+    removeHook(g_targetPresent);
+    removeHook(g_targetPresent1);
+    removeHook(g_targetResizeBuffers);
+    removeHook(g_targetUpdateSubresource);
+    removeHook(g_targetMap);
+    removeHook(g_targetUnmap);
     {
         std::lock_guard<std::mutex> lock(g_mappedBuffersMutex);
         g_mappedBuffers.clear();
     }
-    if (g_targetOMSetRenderTargets) { MH_DisableHook(g_targetOMSetRenderTargets); g_targetOMSetRenderTargets = nullptr; }
-    if (g_targetClearDepthStencilView) { MH_DisableHook(g_targetClearDepthStencilView); g_targetClearDepthStencilView = nullptr; }
-    if (g_targetCreateTexture2D) { MH_DisableHook(g_targetCreateTexture2D); g_targetCreateTexture2D = nullptr; }
+    removeHook(g_targetOMSetRenderTargets);
+    removeHook(g_targetClearDepthStencilView);
+    removeHook(g_targetCreateTexture2D);
 }
 
 } // namespace DX11Hook

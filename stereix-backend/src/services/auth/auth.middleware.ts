@@ -27,7 +27,17 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
 
   const token = authHeader.split(' ')[1];
   try {
-    const payload = jwt.verify(token, config.JWT_SECRET) as AuthenticatedUser;
+    // HIGH-02: Pin HS256 algorithm and reject refresh/non-access token types
+    const payload = jwt.verify(token, config.JWT_SECRET, {
+      algorithms: ['HS256'],
+    }) as AuthenticatedUser & { typ?: string };
+    if (
+      (payload.typ && payload.typ !== 'access') ||
+      typeof payload.id !== 'string' ||
+      typeof payload.role !== 'string'
+    ) {
+      throw new UnauthorizedError('Invalid authentication token type');
+    }
     req.user = payload;
     next();
   } catch {

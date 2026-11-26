@@ -61,12 +61,15 @@ void ImGuiDX12Integration::Render(ID3D12Device* device, ID3D12GraphicsCommandLis
     ImDrawData* drawData = ImGui::GetDrawData();
 
     if (drawData && drawData->TotalVtxCount > 0) {
-        // Draw to Left Eye
-        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_rtvDescHeap->GetCPUDescriptorHandleForHeapStart();
+        const ImVec2 origDisplayPos = drawData->DisplayPos;
+        const float stereoOffset = static_cast<float>(leftDest->GetDesc().Width) * 0.022f;
+
+        // 1. Draw into Left Eye (slot 0, shifted nasally right)
+        D3D12_CPU_DESCRIPTOR_HANDLE rtvLeft = m_rtvDescHeap->GetCPUDescriptorHandleForHeapStart();
         D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
         rtvDesc.Format = leftDest->GetDesc().Format;
         rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-        device->CreateRenderTargetView(leftDest, &rtvDesc, rtvHandle);
+        device->CreateRenderTargetView(leftDest, &rtvDesc, rtvLeft);
 
         D3D12_RESOURCE_BARRIER barrier = {};
         barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -76,37 +79,41 @@ void ImGuiDX12Integration::Render(ID3D12Device* device, ID3D12GraphicsCommandLis
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         cmdList->ResourceBarrier(1, &barrier);
 
-        cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+        drawData->DisplayPos.x = origDisplayPos.x - stereoOffset;
+        cmdList->OMSetRenderTargets(1, &rtvLeft, FALSE, nullptr);
         ImGui_ImplDX12_RenderDrawData(drawData, cmdList);
 
         barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
         cmdList->ResourceBarrier(1, &barrier);
 
-        // Copy menu overlay to Right Eye so both eyes see the exact same HUD
+        // 2. Draw directly into Right Eye (slot 1, shifted nasally left) without overwriting Right Eye stereo image
         if (rightDest && rightDest != leftDest) {
-            D3D12_RESOURCE_BARRIER copyBarriers[2] = {};
-            copyBarriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            copyBarriers[0].Transition.pResource = leftDest;
-            copyBarriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            copyBarriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-            copyBarriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+            D3D12_CPU_DESCRIPTOR_HANDLE rtvRight = m_rtvDescHeap->GetCPUDescriptorHandleForHeapStart();
+            rtvRight.ptr += m_rtvDescriptorSize;
+            D3D12_RENDER_TARGET_VIEW_DESC rtvDescRight = {};
+            rtvDescRight.Format = rightDest->GetDesc().Format;
+            rtvDescRight.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+            device->CreateRenderTargetView(rightDest, &rtvDescRight, rtvRight);
 
-            copyBarriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            copyBarriers[1].Transition.pResource = rightDest;
-            copyBarriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            copyBarriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-            copyBarriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+            D3D12_RESOURCE_BARRIER rightBarrier = {};
+            rightBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            rightBarrier.Transition.pResource = rightDest;
+            rightBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            rightBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            rightBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            cmdList->ResourceBarrier(1, &rightBarrier);
 
-            cmdList->ResourceBarrier(2, copyBarriers);
-            cmdList->CopyResource(rightDest, leftDest);
+            drawData->DisplayPos.x = origDisplayPos.x + stereoOffset;
+            cmdList->OMSetRenderTargets(1, &rtvRight, FALSE, nullptr);
+            ImGui_ImplDX12_RenderDrawData(drawData, cmdList);
 
-            copyBarriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
-            copyBarriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-            copyBarriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-            copyBarriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-            cmdList->ResourceBarrier(2, copyBarriers);
+            rightBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            rightBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            cmdList->ResourceBarrier(1, &rightBarrier);
         }
+
+        drawData->DisplayPos = origDisplayPos;
     }
 }
 

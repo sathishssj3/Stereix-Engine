@@ -4,6 +4,18 @@ module.exports = {
   copyright:   'Copyright © 2026 Mesmeran Lab',
   asar:        true,
 
+  // HIGH-01: Harden packaged Electron binary via @electron/fuses (applied right before Authenticode signing)
+  // Note: STEREIX_DEV_UNHARDENED=1 is strictly for local dev sync:installed workflows only.
+  electronFuses: {
+    runAsNode: false,
+    enableCookieEncryption: true,
+    enableNodeOptionsEnvironmentVariable: false,
+    enableNodeCliInspectArguments: false,
+    enableEmbeddedAsarIntegrityValidation: process.env.STEREIX_DEV_UNHARDENED !== '1',
+    onlyLoadAppFromAsar: true,
+    grantFileProtocolExtraPrivileges: false,
+  },
+
   directories: {
     output: 'dist-electron',
     buildResources: 'assets'

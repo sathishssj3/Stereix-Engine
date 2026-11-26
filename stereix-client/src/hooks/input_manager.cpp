@@ -3,6 +3,7 @@
 #include "hooks/input_hook.h"
 #include "core/overlay_manager.h"
 #include "imgui.h"
+#include <algorithm>
 #include <vector>
 #include <cmath>
 
@@ -280,6 +281,80 @@ void InputManager::Update(XrSession session) {
                     
     InputHook::GetInstance().SetVRControllersActive(isActive);
     InputHook::GetInstance().UpdateEmulatedState(state);
+}
+
+void InputManager::ExtractHeadAnglesDeg(const XrQuaternionf& q, float& outYawDeg, float& outPitchDeg) {
+    float normSq = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+    if (normSq < 1e-6f) {
+        outYawDeg = 0.0f;
+        outPitchDeg = 0.0f;
+        return;
+    }
+    float invNorm = 1.0f / std::sqrt(normSq);
+    float x = q.x * invNorm;
+    float y = q.y * invNorm;
+    float z = q.z * invNorm;
+    float w = q.w * invNorm;
+
+    // OpenXR right-handed forward vector (-Z rotated by head orientation)
+    float fx = -2.0f * (x * z + y * w);
+    float fy = -2.0f * (y * z - x * w);
+    float fz = -(1.0f - 2.0f * (x * x + y * y));
+
+    constexpr float kRadToDeg = 180.0f / 3.14159265358979323846f;
+    // Yaw: turning head RIGHT (+X) yields positive yaw delta
+    outYawDeg = std::atan2(fx, -fz) * kRadToDeg;
+    // Pitch: tilting head UP (+Y) yields positive pitch delta
+    outPitchDeg = std::asin(std::clamp(fy, -1.0f, 1.0f)) * kRadToDeg;
+}
+
+void InputManager::ComputeHeadDeltaDeg(const XrQuaternionf& prevQ, const XrQuaternionf& currQ,
+                                       float& outDeltaYawDeg, float& outDeltaPitchDeg) {
+    float prevYaw = 0.0f, prevPitch = 0.0f;
+    float currYaw = 0.0f, currPitch = 0.0f;
+    ExtractHeadAnglesDeg(prevQ, prevYaw, prevPitch);
+    ExtractHeadAnglesDeg(currQ, currYaw, currPitch);
+
+    float dYaw = currYaw - prevYaw;
+    while (dYaw > 180.0f) dYaw -= 360.0f;
+    while (dYaw < -180.0f) dYaw += 360.0f;
+
+    float dPitch = currPitch - prevPitch;
+
+    // Guard against single-frame tracking re-acquisition / recenter teleports
+    if (std::abs(dYaw) > 35.0f || std::abs(dPitch) > 35.0f) {
+        outDeltaYawDeg = 0.0f;
+        outDeltaPitchDeg = 0.0f;
+        return;
+    }
+
+    outDeltaYawDeg = dYaw;
+    outDeltaPitchDeg = dPitch;
+}
+
+void InputManager::UpdateHeadTracking(const XrPosef& headPose, bool active) {
+    if (!active || OverlayManager::GetInstance().IsOverlayVisible()) {
+        m_hasPrevHeadPose = false;
+        InputHook::GetInstance().ResetAimAccumulator();
+        return;
+    }
+
+    if (!m_hasPrevHeadPose) {
+        m_prevHeadPose = headPose;
+        m_hasPrevHeadPose = true;
+        return;
+    }
+
+    float dYawDeg = 0.0f;
+    float dPitchDeg = 0.0f;
+    ComputeHeadDeltaDeg(m_prevHeadPose.orientation, headPose.orientation, dYawDeg, dPitchDeg);
+    m_prevHeadPose = headPose;
+
+    if (std::abs(dYawDeg) < 0.005f && std::abs(dPitchDeg) < 0.005f) {
+        return;
+    }
+
+    InputHook::GetInstance().InjectAimDelta(dPitchDeg, dYawDeg);
 }
 
 } // namespace vrinject

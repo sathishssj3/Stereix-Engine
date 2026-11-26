@@ -4,10 +4,29 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Security & Hardening compile/link options
+# Security & Hardening compile/link options (MED-01)
 if(MSVC)
-    add_compile_options(/GS /guard:cf /EHa /MP)
-    add_link_options(/DYNAMICBASE /NXCOMPAT /GUARD:CF /HIGHENTROPYVA)
+    file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}" STEREIX_NATIVE_SOURCE_DIR)
+    file(TO_NATIVE_PATH "${CMAKE_BINARY_DIR}" STEREIX_NATIVE_BINARY_DIR)
+    add_compile_options(
+        /GS
+        /guard:cf
+        /guard:ehcont
+        /EHa
+        /MP
+        /Brepro
+        "/d1trimfile:${STEREIX_NATIVE_SOURCE_DIR}\\"
+        "/d1trimfile:${STEREIX_NATIVE_BINARY_DIR}\\"
+    )
+    add_link_options(
+        /DYNAMICBASE
+        /NXCOMPAT
+        /GUARD:CF
+        /GUARD:EHCONT
+        /HIGHENTROPYVA
+        /Brepro
+        /PDBALTPATH:%_PDB%
+    )
 else()
     add_compile_options(-fstack-protector-strong -D_FORTIFY_SOURCE=2)
     add_link_options(-Wl,-z,now -Wl,-z,relro)

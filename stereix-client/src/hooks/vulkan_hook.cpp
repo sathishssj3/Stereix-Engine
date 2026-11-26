@@ -28,15 +28,23 @@ namespace vrinject {
 namespace vulkan {
 namespace hooks {
 
-// Original function pointers for direct exports (if any)
+// Trampolines for direct exports (populated by MH_CreateHook)
 static PFN_vkCreateInstance True_vkCreateInstance = nullptr;
 static PFN_vkGetInstanceProcAddr True_vkGetInstanceProcAddr = nullptr;
 static PFN_vkCreateDevice True_vkCreateDevice = nullptr;
 static PFN_vkGetDeviceProcAddr True_vkGetDeviceProcAddr = nullptr;
 
-// Direct hook trampolines for late-injected hooks (when game cached pointers before us)
+// Original target addresses passed to MH_CreateHook / MH_DisableHook / MH_RemoveHook (HIGH-07)
+static PFN_vkCreateInstance s_targetCreateInstance = nullptr;
+static PFN_vkGetInstanceProcAddr s_targetGetInstanceProcAddr = nullptr;
+static PFN_vkCreateDevice s_targetCreateDevice = nullptr;
+static PFN_vkGetDeviceProcAddr s_targetGetDeviceProcAddr = nullptr;
+
+// Direct hook trampolines and targets for late-injected hooks (when game cached pointers before us)
 static PFN_vkQueuePresentKHR True_vkQueuePresentKHR_Direct = nullptr;
 static PFN_vkQueueSubmit True_vkQueueSubmit_Direct = nullptr;
+static PFN_vkQueuePresentKHR s_lateTargetQueuePresent = nullptr;
+static PFN_vkQueueSubmit s_lateTargetQueueSubmit = nullptr;
 static std::atomic<bool> s_lateHooksInstalled{false};
 
 // M-7: Tracked MinHook targets for exported functions
@@ -176,6 +184,7 @@ static void InstallLateDeviceHooks(VkDevice device) {
                 (LPVOID)Hooked_vkQueuePresentKHR,
                 reinterpret_cast<LPVOID*>(&True_vkQueuePresentKHR_Direct));
             if (status == MH_OK) {
+                s_lateTargetQueuePresent = realPresent;
                 MH_EnableHook((LPVOID)realPresent);
                 LOG_INFO("InstallLateDeviceHooks: Direct hook on vkQueuePresentKHR SUCCESS (addr=%p)", realPresent);
             } else {
@@ -193,6 +202,7 @@ static void InstallLateDeviceHooks(VkDevice device) {
                 (LPVOID)Hooked_vkQueueSubmit,
                 reinterpret_cast<LPVOID*>(&True_vkQueueSubmit_Direct));
             if (status == MH_OK) {
+                s_lateTargetQueueSubmit = realSubmit;
                 MH_EnableHook((LPVOID)realSubmit);
                 LOG_INFO("InstallLateDeviceHooks: Direct hook on vkQueueSubmit SUCCESS (addr=%p)", realSubmit);
             } else {
@@ -305,9 +315,11 @@ static VkResult ForwardQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pP
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hooked_vkQueuePresentKHR_Internal(
     VkQueue queue,
-    const VkPresentInfoKHR* pPresentInfo)
+    const VkPresentInfoKHR* pPresentInfo,
+    bool& originalCalled,
+    VkResult& outRes)
 {
-    LOG_INFO("Hooked_vkQueuePresentKHR CALLED (queue=%p)", queue);
+    LOG_DEBUG("Hooked_vkQueuePresentKHR CALLED (queue=%p)", queue);
 
     auto device = VulkanQueueManager::Get().GetDevice();
 
@@ -326,8 +338,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hooked_vkQueuePresentKHR_Internal(
         RenderFrameSnapshot snapshot = VulkanLifecycleManager::Get().CreateSnapshot(queue);
         std::string error;
         if (VulkanSnapshotValidator::Validate(snapshot, error)) {
-            SubsystemContext::Get().GetFrameCoordinator()->OnPresentBegin(snapshot);
-            SubsystemContext::Get().GetFrameCoordinator()->OnPresentEnd();
+            if (auto* frameCoord = SubsystemContext::Get().GetFrameCoordinator()) {
+                frameCoord->OnPresentBegin(snapshot);
+                frameCoord->OnPresentEnd();
+            }
         } else {
             static int logCount = 0;
             if (logCount < 50) {
@@ -339,19 +353,26 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hooked_vkQueuePresentKHR_Internal(
         VulkanDepthCandidateCollector::Get().CollectCandidates(device);
     }
 
-    return ForwardQueuePresentKHR(queue, pPresentInfo, device);
+    originalCalled = true;
+    outRes = ForwardQueuePresentKHR(queue, pPresentInfo, device);
+    return outRes;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL Hooked_vkQueuePresentKHR(
     VkQueue queue,
     const VkPresentInfoKHR* pPresentInfo)
 {
+    bool originalCalled = false;
+    VkResult outRes = VK_ERROR_DEVICE_LOST;
     __try {
-        return Hooked_vkQueuePresentKHR_Internal(queue, pPresentInfo);
+        return Hooked_vkQueuePresentKHR_Internal(queue, pPresentInfo, originalCalled, outRes);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
-        LOG_ERROR("VulkanHook: SEH hardware exception caught in Hooked_vkQueuePresentKHR! Safely forwarding to driver.");
-        return ForwardQueuePresentKHR(queue, pPresentInfo, VulkanQueueManager::Get().GetDevice());
+        LOG_ERROR("VulkanHook: SEH hardware exception caught in Hooked_vkQueuePresentKHR! (originalCalled=%d)", originalCalled ? 1 : 0);
+        if (!originalCalled) {
+            return ForwardQueuePresentKHR(queue, pPresentInfo, VulkanQueueManager::Get().GetDevice());
+        }
+        return outRes;
     }
 }
 
@@ -457,7 +478,7 @@ VKAPI_ATTR VkResult VKAPI_CALL Hooked_vkAllocateDescriptorSets(VkDevice device, 
     if (!dt || !dt->AllocateDescriptorSets) return VK_ERROR_INITIALIZATION_FAILED;
 
     VkResult result = dt->AllocateDescriptorSets(device, pAllocateInfo, pDescriptorSets);
-    if (result == VK_SUCCESS && pDescriptorSets) {
+    if (result == VK_SUCCESS && pAllocateInfo && pDescriptorSets) {
         VulkanDescriptorTracker::Get().TrackDescriptorSets(device, pAllocateInfo->descriptorPool, pAllocateInfo->descriptorSetCount, pDescriptorSets);
     }
     return result;
@@ -632,7 +653,7 @@ VKAPI_ATTR VkResult VKAPI_CALL Hooked_vkCreateImageView(VkDevice device, const V
     auto dt = VulkanDispatchTable::Get().GetDeviceDispatch(device);
     if (dt && dt->CreateImageView) {
         VkResult res = dt->CreateImageView(device, pCreateInfo, pAllocator, pView);
-        if (res == VK_SUCCESS) {
+        if (res == VK_SUCCESS && pView) {
             VulkanImageViewTracker::Get().OnCreateImageView(device, pCreateInfo, *pView);
         }
         return res;
@@ -650,7 +671,7 @@ VKAPI_ATTR VkResult VKAPI_CALL Hooked_vkCreateFramebuffer(VkDevice device, const
     auto dt = VulkanDispatchTable::Get().GetDeviceDispatch(device);
     if (dt && dt->CreateFramebuffer) {
         VkResult res = dt->CreateFramebuffer(device, pCreateInfo, pAllocator, pFramebuffer);
-        if (res == VK_SUCCESS) {
+        if (res == VK_SUCCESS && pFramebuffer) {
             VulkanFramebufferTracker::Get().OnCreateFramebuffer(device, pCreateInfo, *pFramebuffer);
         }
         return res;
@@ -689,14 +710,14 @@ void InstallVulkanHooks() {
 
     LOG_DEBUG("InstallVulkanHooks: Found vulkan-1.dll. Attempting to hook...");
 
-    True_vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)GetProcAddress(vulkanModule, "vkGetInstanceProcAddr");
-    True_vkCreateInstance = (PFN_vkCreateInstance)GetProcAddress(vulkanModule, "vkCreateInstance");
-    True_vkCreateDevice = (PFN_vkCreateDevice)GetProcAddress(vulkanModule, "vkCreateDevice");
-    True_vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)GetProcAddress(vulkanModule, "vkGetDeviceProcAddr");
+    auto rawGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)GetProcAddress(vulkanModule, "vkGetInstanceProcAddr");
+    auto rawCreateInstance = (PFN_vkCreateInstance)GetProcAddress(vulkanModule, "vkCreateInstance");
+    auto rawCreateDevice = (PFN_vkCreateDevice)GetProcAddress(vulkanModule, "vkCreateDevice");
+    auto rawGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)GetProcAddress(vulkanModule, "vkGetDeviceProcAddr");
 
-
-    if (True_vkGetInstanceProcAddr) {
-        if (MH_CreateHook((LPVOID)True_vkGetInstanceProcAddr, (LPVOID)VulkanDispatchTable::Hooked_vkGetInstanceProcAddr, reinterpret_cast<LPVOID*>(&True_vkGetInstanceProcAddr)) == MH_OK) {
+    if (rawGetInstanceProcAddr) {
+        if (MH_CreateHook((LPVOID)rawGetInstanceProcAddr, (LPVOID)VulkanDispatchTable::Hooked_vkGetInstanceProcAddr, reinterpret_cast<LPVOID*>(&True_vkGetInstanceProcAddr)) == MH_OK) {
+            s_targetGetInstanceProcAddr = rawGetInstanceProcAddr;
             LOG_DEBUG("InstallVulkanHooks: Successfully created hook for vkGetInstanceProcAddr");
             VulkanDispatchTable::Get().InitOriginalGetInstanceProcAddr(True_vkGetInstanceProcAddr);
         } else {
@@ -704,24 +725,27 @@ void InstallVulkanHooks() {
         }
     }
     
-    if (True_vkCreateInstance) {
-        if (MH_CreateHook((LPVOID)True_vkCreateInstance, (LPVOID)Hooked_vkCreateInstance, reinterpret_cast<LPVOID*>(&True_vkCreateInstance)) == MH_OK) {
+    if (rawCreateInstance) {
+        if (MH_CreateHook((LPVOID)rawCreateInstance, (LPVOID)Hooked_vkCreateInstance, reinterpret_cast<LPVOID*>(&True_vkCreateInstance)) == MH_OK) {
+            s_targetCreateInstance = rawCreateInstance;
             LOG_DEBUG("InstallVulkanHooks: Successfully created hook for vkCreateInstance");
         } else {
             LOG_ERROR("InstallVulkanHooks: Failed to create hook for vkCreateInstance");
         }
     }
     
-    if (True_vkCreateDevice) {
-        if (MH_CreateHook((LPVOID)True_vkCreateDevice, (LPVOID)Hooked_vkCreateDevice, reinterpret_cast<LPVOID*>(&True_vkCreateDevice)) == MH_OK) {
+    if (rawCreateDevice) {
+        if (MH_CreateHook((LPVOID)rawCreateDevice, (LPVOID)Hooked_vkCreateDevice, reinterpret_cast<LPVOID*>(&True_vkCreateDevice)) == MH_OK) {
+            s_targetCreateDevice = rawCreateDevice;
             LOG_DEBUG("InstallVulkanHooks: Successfully created hook for vkCreateDevice");
         } else {
             LOG_ERROR("InstallVulkanHooks: Failed to create hook for vkCreateDevice");
         }
     }
 
-    if (True_vkGetDeviceProcAddr) {
-        if (MH_CreateHook((LPVOID)True_vkGetDeviceProcAddr, (LPVOID)VulkanDispatchTable::Hooked_vkGetDeviceProcAddr, reinterpret_cast<LPVOID*>(&True_vkGetDeviceProcAddr)) == MH_OK) {
+    if (rawGetDeviceProcAddr) {
+        if (MH_CreateHook((LPVOID)rawGetDeviceProcAddr, (LPVOID)VulkanDispatchTable::Hooked_vkGetDeviceProcAddr, reinterpret_cast<LPVOID*>(&True_vkGetDeviceProcAddr)) == MH_OK) {
+            s_targetGetDeviceProcAddr = rawGetDeviceProcAddr;
             LOG_DEBUG("InstallVulkanHooks: Successfully created hook for vkGetDeviceProcAddr");
             VulkanDispatchTable::Get().InitOriginalGetDeviceProcAddr(True_vkGetDeviceProcAddr);
         } else {
@@ -733,6 +757,8 @@ void InstallVulkanHooks() {
     if (s_realCreateSwapchain) {
         if (MH_CreateHook((LPVOID)s_realCreateSwapchain, (LPVOID)Hooked_vkCreateSwapchainKHR, nullptr) == MH_OK) {
             LOG_DEBUG("InstallVulkanHooks: Successfully created hook for exported vkCreateSwapchainKHR");
+        } else {
+            s_realCreateSwapchain = nullptr;
         }
     }
 
@@ -740,6 +766,8 @@ void InstallVulkanHooks() {
     if (s_realQueuePresent) {
         if (MH_CreateHook((LPVOID)s_realQueuePresent, (LPVOID)Hooked_vkQueuePresentKHR, reinterpret_cast<LPVOID*>(&True_vkQueuePresentKHR_Direct)) == MH_OK) {
             LOG_DEBUG("InstallVulkanHooks: Successfully created hook for exported vkQueuePresentKHR");
+        } else {
+            s_realQueuePresent = nullptr;
         }
     }
 
@@ -747,42 +775,37 @@ void InstallVulkanHooks() {
     if (s_realQueueSubmit) {
         if (MH_CreateHook((LPVOID)s_realQueueSubmit, (LPVOID)Hooked_vkQueueSubmit, reinterpret_cast<LPVOID*>(&True_vkQueueSubmit_Direct)) == MH_OK) {
             LOG_DEBUG("InstallVulkanHooks: Successfully created hook for exported vkQueueSubmit");
+        } else {
+            s_realQueueSubmit = nullptr;
         }
     }
 }
 
 void RemoveVulkanHooks() {
-    if (True_vkGetInstanceProcAddr) {
-        MH_DisableHook((LPVOID)True_vkGetInstanceProcAddr);
-        MH_RemoveHook((LPVOID)True_vkGetInstanceProcAddr);
-    }
-    if (True_vkCreateInstance) {
-        MH_DisableHook((LPVOID)True_vkCreateInstance);
-        MH_RemoveHook((LPVOID)True_vkCreateInstance);
-    }
-    if (True_vkCreateDevice) {
-        MH_DisableHook((LPVOID)True_vkCreateDevice);
-        MH_RemoveHook((LPVOID)True_vkCreateDevice);
-    }
-    if (True_vkGetDeviceProcAddr) {
-        MH_DisableHook((LPVOID)True_vkGetDeviceProcAddr);
-        MH_RemoveHook((LPVOID)True_vkGetDeviceProcAddr);
-    }
-    if (s_realCreateSwapchain) {
-        MH_DisableHook((LPVOID)s_realCreateSwapchain);
-        MH_RemoveHook((LPVOID)s_realCreateSwapchain);
-        s_realCreateSwapchain = nullptr;
-    }
-    if (s_realQueuePresent) {
-        MH_DisableHook((LPVOID)s_realQueuePresent);
-        MH_RemoveHook((LPVOID)s_realQueuePresent);
-        s_realQueuePresent = nullptr;
-    }
-    if (s_realQueueSubmit) {
-        MH_DisableHook((LPVOID)s_realQueueSubmit);
-        MH_RemoveHook((LPVOID)s_realQueueSubmit);
-        s_realQueueSubmit = nullptr;
-    }
+    auto removeTarget = [](auto& targetPtr) {
+        if (targetPtr) {
+            MH_DisableHook((LPVOID)targetPtr);
+            MH_RemoveHook((LPVOID)targetPtr);
+            targetPtr = nullptr;
+        }
+    };
+    removeTarget(s_targetGetInstanceProcAddr);
+    removeTarget(s_targetCreateInstance);
+    removeTarget(s_targetCreateDevice);
+    removeTarget(s_targetGetDeviceProcAddr);
+    removeTarget(s_realCreateSwapchain);
+    removeTarget(s_realQueuePresent);
+    removeTarget(s_realQueueSubmit);
+    removeTarget(s_lateTargetQueuePresent);
+    removeTarget(s_lateTargetQueueSubmit);
+
+    True_vkGetInstanceProcAddr = nullptr;
+    True_vkCreateInstance = nullptr;
+    True_vkCreateDevice = nullptr;
+    True_vkGetDeviceProcAddr = nullptr;
+    True_vkQueuePresentKHR_Direct = nullptr;
+    True_vkQueueSubmit_Direct = nullptr;
+    s_lateHooksInstalled.store(false, std::memory_order_release);
 }
 
 } // namespace hooks

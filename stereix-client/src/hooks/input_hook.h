@@ -25,18 +25,23 @@ public:
 
     // Used by OpenXRManager to update the global emulated state
     void UpdateEmulatedState(const XINPUT_STATE& state);
-    void SetVRControllersActive(bool active) { m_vrControllersActive = active; }
+    void SetVRControllersActive(bool active) { m_vrControllersActive.store(active, std::memory_order_release); }
 
     // Used by OpenXRManager to inject 1:1 motion aiming
     void InjectAimDelta(float pitchDeg, float yawDeg);
+    void ResetAimAccumulator() { m_aimAccumX = 0.0f; m_aimAccumY = 0.0f; }
     // void SetOpenXRManager(OpenXRManager* mgr) { m_openxrManager = mgr; }
 
     // Start background input capture for Null Driver users
     void StartBackgroundCapture();
     void StopBackgroundCapture();
     void SetTargetHwnd(HWND hwnd);
-    HWND GetTargetHwnd() const { return m_targetHwnd; }
+    HWND GetTargetHwnd() const { return m_targetHwnd.load(std::memory_order_acquire); }
     bool IsCaptureActive() const { return m_captureActive; }
+
+    // Verifies whether a foreground window belongs to a known VR mirror/compositor process (HIGH-04)
+    static bool IsVerifiedVrMirrorProcessName(const wchar_t* processImagePath);
+    static bool IsVerifiedVrMirrorWindow(HWND hwnd);
     
     int GetVirtualCursorX() const { return m_virtualCursorX.load(); }
     int GetVirtualCursorY() const { return m_virtualCursorY.load(); }
@@ -66,10 +71,13 @@ private:
     InputHook() = default;
     ~InputHook() = default;
 
+    mutable std::mutex m_emulatedStateMutex;
     XINPUT_STATE m_emulatedState = {};
     bool m_initialized = false;
     bool m_usesRawInput = false;
-    bool m_vrControllersActive = false;
+    std::atomic<bool> m_vrControllersActive{false};
+    float m_aimAccumX = 0.0f;
+    float m_aimAccumY = 0.0f;
     // OpenXRManager* m_openxrManager = nullptr;
 
     // Hook definitions
@@ -83,6 +91,16 @@ private:
     XInputGetState_t OriginalXInputGetState = nullptr;
     XInputSetState_t OriginalXInputSetState = nullptr;
 
+    // Tracked MinHook targets so Shutdown() removes every detour cleanly (MED-02)
+    void* m_targetXInputGetState = nullptr;
+    void* m_targetXInputSetState = nullptr;
+    void* m_targetGetForegroundWindow = nullptr;
+    void* m_targetGetActiveWindow = nullptr;
+    void* m_targetGetCursorPos = nullptr;
+    void* m_targetSetCursor = nullptr;
+    void* m_targetGetRawInputData = nullptr;
+    void* m_targetWndProc = nullptr;
+
     // Background Capture Support
     std::thread m_captureThread;
     std::atomic<bool> m_captureRunning{false};
@@ -90,7 +108,7 @@ private:
     std::atomic<bool> m_captureThreadReady{false};
     std::mutex m_captureMutex;
     std::condition_variable m_captureCv;
-    HWND m_targetHwnd = nullptr;
+    std::atomic<HWND> m_targetHwnd{nullptr};
     HHOOK m_keyboardHook = nullptr;
     HHOOK m_mouseHook = nullptr;
 

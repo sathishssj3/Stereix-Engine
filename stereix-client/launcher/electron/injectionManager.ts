@@ -28,62 +28,57 @@ export let activeGameId = '';
 export let activeSessionStartTime = 0;
 export let activeSessionConfig: any = null;
 
-const injectRateLimits: Record<string, number[]> = {};
+const injectRateLimits: Record<string, number[]> = Object.create(null);
 let injectionInProgress = false;
 let activeLogPath = '';
+
+function verifyOtaAssetHash(otaPath: string, local: ReturnType<typeof getLocalManifest>): boolean {
+  if (!local || !local.hashes) {
+    console.warn(`[SECURITY] No cryptographically verified manifest found for ${otaPath}! Discarding OTA cache.`);
+    return false;
+  }
+  const basename = path.basename(otaPath);
+  const expectedHash = local.hashes[basename];
+  if (!expectedHash) {
+    console.warn(`[SECURITY] OTA file ${basename} not found in verified manifest hashes! Discarding.`);
+    return false;
+  }
+  const fileBuf = fs.readFileSync(otaPath);
+  const actualHash = crypto.createHash('sha256').update(fileBuf).digest('hex').toLowerCase();
+  if (actualHash !== expectedHash.toLowerCase()) {
+    console.warn(`[SECURITY] OTA file ${basename} SHA-256 mismatch at deploy time! Discarding OTA and falling back to bundled binary.`);
+    try { fs.unlinkSync(otaPath); } catch {}
+    return false;
+  }
+  return true;
+}
 
 export function pickPreferredAsset(canonicalPath: string, otaPath: string, minSize = 0): string {
   const otaExists = fs.existsSync(otaPath) && (minSize === 0 || fs.statSync(otaPath).size >= minSize);
   const canonExists = fs.existsSync(canonicalPath) && (minSize === 0 || fs.statSync(canonicalPath).size >= minSize);
 
   if (!otaExists) return canonicalPath;
-  if (!canonExists) return otaPath;
 
   // In development mode (npm run dev / unpacked), local build artifacts must ALWAYS take precedence over downloaded OTA cache!
   if (!app.isPackaged) {
     return canonicalPath;
   }
 
-  // In packaged mode, if the app version matches or exceeds the OTA manifest version,
-  // the bundled binaries are up-to-date and MUST take precedence over stale cached files!
+  // Packaged mode: OTA assets are ONLY eligible when backed by a cryptographically verified manifest
+  // strictly newer than the installed app AND matching the manifest's SHA-256 hash (HIGH-10).
   try {
     const local = getLocalManifest();
     const appVer = app.getVersion();
-    if (local && appVer && compareSemver(appVer, local.engineVersion) >= 0) {
+    if (!local || !local.hashes) {
       return canonicalPath;
     }
-  } catch {}
-
-  // If OTA is strictly newer than the bundled binary by timestamp, use OTA hotfix
-  try {
-    const otaMtime = fs.statSync(otaPath).mtimeMs;
-    const canonMtime = fs.statSync(canonicalPath).mtimeMs;
-    if (otaMtime >= canonMtime) {
-      // C-4: Re-verify the OTA cache file's SHA-256 against signed local manifest
-      try {
-        const local = getLocalManifest();
-        if (local && local.hashes) {
-          const basename = path.basename(otaPath);
-          const expectedHash = local.hashes[basename];
-          if (expectedHash) {
-            const fileBuf = fs.readFileSync(otaPath);
-            const actualHash = crypto.createHash('sha256').update(fileBuf).digest('hex').toLowerCase();
-            if (actualHash !== expectedHash.toLowerCase()) {
-              console.warn(`[SECURITY] OTA file ${basename} SHA-256 mismatch at deploy time! Discarding OTA and falling back to bundled binary.`);
-              try { fs.unlinkSync(otaPath); } catch {}
-              return canonicalPath;
-            }
-          } else {
-            console.warn(`[SECURITY] OTA file ${basename} not found in verified manifest hashes! Discarding.`);
-            return canonicalPath;
-          }
-        } else {
-          console.warn(`[SECURITY] No cryptographically verified manifest found for ${otaPath}! Discarding OTA cache.`);
-          return canonicalPath;
-        }
-      } catch {
-        return canonicalPath;
-      }
+    if (canonExists && appVer && compareSemver(appVer, local.engineVersion) >= 0) {
+      return canonicalPath;
+    }
+    if (!canonExists) {
+      return verifyOtaAssetHash(otaPath, local) ? otaPath : canonicalPath;
+    }
+    if (verifyOtaAssetHash(otaPath, local)) {
       return otaPath;
     }
     return canonicalPath;
@@ -102,19 +97,165 @@ async function terminatePid(pid: number, force = false): Promise<void> {
   }).catch(() => {});
 }
 
-async function getProcessPath(pid: number): Promise<string> {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return '';
+interface RunningGameCandidate {
+  pid: number;
+  memory: number;
+  path: string;
+  hasWindow: boolean;
+}
+
+async function inspectProcess(pid: number): Promise<{ path: string; hasWindow: boolean }> {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return { path: '', hasWindow: false };
   try {
-    const command = `try { (Get-Process -Id ${pid} -ErrorAction Stop).Path } catch { (Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction SilentlyContinue).ExecutablePath }`;
+    const command =
+      `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; ` +
+      `$ep = ''; try { $ep = $p.Path } catch {}; ` +
+      `if (-not $ep) { $ep = (Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction SilentlyContinue).ExecutablePath }; ` +
+      `$hw = if ($p -and $p.MainWindowHandle -ne [IntPtr]::Zero) { '1' } else { '0' }; ` +
+      `Write-Output "$hw|$ep"`;
     const { stdout } = await execFileAsync(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-Command', command],
       { encoding: 'utf-8', timeout: 3000, windowsHide: true }
     );
-    return stdout.trim();
+    const trimmed = stdout.trim();
+    const sepIdx = trimmed.indexOf('|');
+    if (sepIdx === -1) return { path: trimmed, hasWindow: false };
+    return {
+      hasWindow: trimmed.slice(0, sepIdx) === '1',
+      path: trimmed.slice(sepIdx + 1).trim(),
+    };
   } catch {
-    return '';
+    return { path: '', hasWindow: false };
   }
+}
+
+async function findRunningGameCandidate(
+  targetExeName: string,
+  installPath: string,
+  targetExeDir: string,
+  allowLowMemoryFallback = false
+): Promise<RunningGameCandidate | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'tasklist.exe',
+      ['/fi', `IMAGENAME eq ${targetExeName}`, '/fo', 'csv', '/nh'],
+      { encoding: 'utf-8', timeout: 2000, killSignal: 'SIGKILL', windowsHide: true }
+    );
+
+    const candidates: Array<{ pid: number; memory: number }> = [];
+    for (const line of stdout.split('\n')) {
+      if (!line.trim() || line.startsWith('INFO:')) continue;
+      const parts = line.split('","');
+      if (parts.length < 5) continue;
+      const exeName = parts[0].replace(/"/g, '').toLowerCase();
+      const pid = Number.parseInt(parts[1].replace(/"/g, ''), 10);
+      const memory = Number.parseInt(
+        parts[4].replace(/"/g, '').replace(/,/g, '').replace(/\s*K\s*$/i, ''),
+        10
+      );
+      // Filter out processes with invalid PID or negligible memory (e.g. zombie processes < 5MB)
+      if (exeName === targetExeName && Number.isSafeInteger(pid) && memory > 5000) {
+        candidates.push({ pid, memory: Number.isFinite(memory) ? memory : 0 });
+      }
+    }
+
+    if (candidates.length === 0) return null;
+
+    // Sort highest-memory candidates first so shipping game binaries win over tiny stubs
+    candidates.sort((a, b) => b.memory - a.memory);
+
+    const resolvedInstall = path.resolve(installPath).toLowerCase();
+    const installPrefix = resolvedInstall.endsWith(path.sep) ? resolvedInstall : resolvedInstall + path.sep;
+    let selectedCandidate: RunningGameCandidate | null = null;
+    const uninspectableCandidates: Array<{ pid: number; memory: number }> = [];
+
+    for (const candidate of candidates) {
+      const info = await inspectProcess(candidate.pid).catch(() => ({ path: '', hasWindow: false }));
+      if (!info.path) {
+        uninspectableCandidates.push(candidate);
+        continue;
+      }
+
+      const resolvedCandPath = path.resolve(info.path).toLowerCase();
+      const isInsideInstall = resolvedCandPath.startsWith(installPrefix);
+      if (!isInsideInstall) continue;
+
+      const lowerPath = info.path.toLowerCase();
+      const isShippingBinary = lowerPath.includes('binaries') || lowerPath.includes('shipping');
+
+      if (isShippingBinary || candidate.memory > 50000) {
+        selectedCandidate = { ...candidate, path: info.path, hasWindow: info.hasWindow };
+        break;
+      }
+
+      if (!selectedCandidate) {
+        selectedCandidate = { ...candidate, path: info.path, hasWindow: info.hasWindow };
+      }
+    }
+
+    // Resilient Fallback: ONLY for candidates whose executable path lookup was blocked by
+    // Windows token/elevation permissions (empty info.path). NEVER fall back to a candidate
+    // whose path was inspected and proven to live outside installPath (CRIT-02).
+    if (!selectedCandidate && uninspectableCandidates.length > 0) {
+      const best = uninspectableCandidates[0];
+      if (best.memory > 30000 || allowLowMemoryFallback) {
+        selectedCandidate = {
+          pid: best.pid,
+          memory: best.memory,
+          path: path.join(targetExeDir, targetExeName),
+          hasWindow: false,
+        };
+      }
+    }
+
+    return selectedCandidate;
+  } catch {
+    return null;
+  }
+}
+
+function stripAnsiAndBom(text: string): string {
+  return text
+    .replace(/^\uFEFF/, '')
+    .replace(/\x1b\[[0-9;]*m/g, '')
+    .trim();
+}
+
+function extractCliFailureReason(logFilePath: string, error: any): { message: string; isUacCancelled: boolean } {
+  const rawErr = String(error?.stderr || error?.message || '');
+  if (/canceled by the user|cancelled by the user|1223/i.test(rawErr)) {
+    return {
+      message: 'UAC elevation prompt was cancelled by the user.',
+      isUacCancelled: true,
+    };
+  }
+
+  try {
+    if (fs.existsSync(logFilePath)) {
+      const raw = fs.readFileSync(logFilePath, 'utf-8');
+      const lines = raw
+        .split(/\r?\n/)
+        .map(stripAnsiAndBom)
+        .filter((l) => l.length > 0);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i];
+        if (/\[(\s*FAIL\s*|ERROR|SECURITY[^\]]*)\]/i.test(line)) {
+          return { message: line, isUacCancelled: false };
+        }
+      }
+      if (lines.length > 0) {
+        return { message: lines[lines.length - 1], isUacCancelled: false };
+      }
+    }
+  } catch {}
+
+  const codeMatch = rawErr.match(/exit code\s+(\d+)/i) || (error?.code ? [String(error.code), String(error.code)] : null);
+  const codeSuffix = codeMatch ? ` (Exit code ${codeMatch[1]})` : '';
+  return {
+    message: `vr-inject-cli failed${codeSuffix}. Check session log for details.`,
+    isUacCancelled: false,
+  };
 }
 
 let activeWatchedLogPaths: string[] = [];
@@ -212,6 +353,14 @@ function readNewBytes(normalized: string, event: Electron.IpcMainInvokeEvent): v
     }
   } catch {} finally {
     isReadingLogs = false;
+  }
+}
+
+function flushWatchedLogs(event: Electron.IpcMainInvokeEvent): void {
+  for (const p of [...activeWatchedLogPaths]) {
+    try {
+      readNewBytes(p, event);
+    } catch {}
   }
 }
 
@@ -387,24 +536,14 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
     const updatesDir = path.join(app.getPath('userData'), 'updates');
     const hotfixShaders = path.join(updatesDir, 'shaders');
 
-    if (validId.startsWith('custom_') && gameExeMap[validId]) {
-      const customExe = canonicalExistingPath(gameExeMap[validId], 'file');
-      resolveWithinRoot(installPath, path.relative(installPath, customExe));
-      // M-9: Use shell.openPath directly to eliminate cmd.exe %VAR% expansion and command injection
-      await shell.openPath(customExe);
-    } else if (/^\d+$/.test(validId)) {
-      await shell.openExternal(`steam://rungameid/${validId}`);
-    } else {
-      await shell.openExternal(
-        `com.epicgames.launcher://apps/${encodeURIComponent(validId)}?action=launch&silent=true`
-      );
-    }
-
+    // Step 1: Resolve target executable BEFORE launching so we can detect already-running games
+    // and deploy shaders, models, DLLs, and vrinject.json without racing game startup.
     let targetExeName = '';
     let targetExeDir = installPath;
     const registeredExe = gameExeMap[validId];
     if (registeredExe) {
       const customExe = canonicalExistingPath(registeredExe, 'file');
+      resolveWithinRoot(installPath, path.relative(installPath, customExe));
       targetExeName = path.basename(customExe).toLowerCase();
       targetExeDir = path.dirname(customExe);
     } else {
@@ -462,18 +601,54 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
       return { success: false, message: 'Could not determine main executable name' };
     }
 
+    // Step 2: Check whether the game process is already running before deploying/launching.
+    const alreadyRunning = await findRunningGameCandidate(targetExeName, installPath, targetExeDir, false);
+    if (alreadyRunning) {
+      targetExeDir = path.dirname(alreadyRunning.path);
+    }
+
     try {
+      const verifiedLocalManifest = getLocalManifest();
+      const currentAppVer = app.getVersion();
+      const isOtaNewerAndVerified = Boolean(
+        app.isPackaged &&
+        verifiedLocalManifest &&
+        verifiedLocalManifest.hashes &&
+        currentAppVer &&
+        compareSemver(currentAppVer, verifiedLocalManifest.engineVersion) < 0
+      );
+
+      // Fail-closed OTA shaders (HIGH-10): ONLY use hotfixShaders when manifest signature is valid,
+      // OTA is strictly newer than bundled app, AND EVERY file recursively inside hotfixShaders passes SHA-256 verification.
       let activeShadersSource = shadersSource;
-      if (!app.isPackaged && fs.existsSync(shadersSource)) {
-        activeShadersSource = shadersSource;
-      } else if (fs.existsSync(hotfixShaders) && fs.readdirSync(hotfixShaders).length > 0) {
+      if (isOtaNewerAndVerified && fs.existsSync(hotfixShaders)) {
         try {
-          const local = getLocalManifest();
-          const appVer = app.getVersion();
-          if (local && appVer && compareSemver(appVer, local.engineVersion) >= 0) {
-            activeShadersSource = shadersSource;
-          } else {
+          const collectFiles = (dir: string, relBase = ''): string[] => {
+            const out: string[] = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              if (entry.isSymbolicLink()) return ['__SYMLINK_REJECTED__'];
+              const rel = relBase ? `${relBase}/${entry.name}` : entry.name;
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                out.push(...collectFiles(full, rel));
+              } else if (entry.isFile()) {
+                out.push(rel);
+              }
+            }
+            return out;
+          };
+          const shaderFiles = collectFiles(hotfixShaders);
+          const allVerified = shaderFiles.length > 0 && shaderFiles.every((relFile) => {
+            if (relFile === '__SYMLINK_REJECTED__') return false;
+            const expected = verifiedLocalManifest?.hashes?.[`shaders/${relFile}`];
+            if (!expected) return false;
+            const actual = crypto.createHash('sha256').update(fs.readFileSync(path.join(hotfixShaders, relFile))).digest('hex').toLowerCase();
+            return actual === expected.toLowerCase();
+          });
+          if (allVerified) {
             activeShadersSource = hotfixShaders;
+          } else {
+            console.warn('[SECURITY] OTA shader SHA-256 verification failed or incomplete; failing closed to bundled shaders.');
           }
         } catch {
           activeShadersSource = shadersSource;
@@ -486,10 +661,42 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
         if (fs.existsSync(subDir)) targetDirs.add(subDir);
       }
 
+      const loadOwnership = (dir: string): { files: Set<string>; dirs: Set<string> } => {
+        const manifestPath = path.join(dir, '.stereix_deployed.json');
+        try {
+          if (fs.existsSync(manifestPath)) {
+            const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+            return {
+              files: new Set<string>(Array.isArray(parsed.files) ? parsed.files : []),
+              dirs: new Set<string>(Array.isArray(parsed.dirs) ? parsed.dirs : []),
+            };
+          }
+        } catch {}
+        return { files: new Set<string>(), dirs: new Set<string>() };
+      };
+      const saveOwnership = (dir: string, owned: { files: Set<string>; dirs: Set<string> }) => {
+        try {
+          const manifestPath = path.join(dir, '.stereix_deployed.json');
+          fs.writeFileSync(
+            manifestPath,
+            JSON.stringify({ version: 1, files: Array.from(owned.files), dirs: Array.from(owned.dirs) }, null, 2),
+            'utf-8'
+          );
+        } catch {}
+      };
+      const ownershipByDir = new Map<string, { files: Set<string>; dirs: Set<string> }>();
       for (const d of targetDirs) {
+        ownershipByDir.set(d, loadOwnership(d));
+      }
+
+      for (const d of targetDirs) {
+        const owned = ownershipByDir.get(d)!;
         if (fs.existsSync(activeShadersSource)) {
           try {
-            fs.cpSync(activeShadersSource, path.join(d, 'shaders'), {
+            const dstShaders = path.join(d, 'shaders');
+            const existedBefore = fs.existsSync(dstShaders);
+            if (!existedBefore) owned.dirs.add('shaders');
+            fs.cpSync(activeShadersSource, dstShaders, {
               recursive: true,
               force: true,
               dereference: false,
@@ -498,7 +705,9 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
         }
         if (fs.existsSync(modelsSource)) {
           try {
-            fs.cpSync(modelsSource, path.join(d, 'models'), {
+            const dstModels = path.join(d, 'models');
+            if (!fs.existsSync(dstModels)) owned.dirs.add('models');
+            fs.cpSync(modelsSource, dstModels, {
               recursive: true,
               force: true,
               dereference: false,
@@ -509,7 +718,8 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
 
       // Copy ONNX and DirectML DLLs to prevent target process loader lock/freeze due to missing imports
       // Also copy vrinject.dll and openxr_loader.dll so the implicit Vulkan layer can pick it up BEFORE the game starts
-      // Prioritize local builds in dev mode, or newer OTA hotfixed binaries if available in packaged mode!
+      // Prioritize local builds in dev mode, or newer verified OTA hotfixed binaries if available in packaged mode!
+      // MED-04: Track Stereix-owned files so uninstall never deletes a game's pre-existing DirectML/onnxruntime DLLs.
       const dllsToCopy = ['onnxruntime.dll', 'DirectML.dll', 'vrinject.dll', 'openxr_loader.dll'];
       for (const dll of dllsToCopy) {
         const hotfixPath = path.join(updatesDir, dll);
@@ -518,8 +728,17 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
 
         if (fs.existsSync(srcPath)) {
           for (const d of targetDirs) {
+            const owned = ownershipByDir.get(d)!;
+            const dstFile = path.join(d, dll);
+            const isSharedRuntime = dll === 'onnxruntime.dll' || dll === 'DirectML.dll' || dll === 'openxr_loader.dll';
             try {
-              fs.copyFileSync(srcPath, path.join(d, dll));
+              const existedBefore = fs.existsSync(dstFile);
+              if (existedBefore && isSharedRuntime && !owned.files.has(dll)) {
+                // Preserve pre-existing game-shipped runtime DLL (do not overwrite or claim ownership)
+                continue;
+              }
+              fs.copyFileSync(srcPath, dstFile);
+              owned.files.add(dll);
               console.info(`Copied ${dll} to ${d} (source: ${srcPath === hotfixPath ? 'HOTFIX' : 'LOCAL/BUNDLED'})`);
             } catch (e) {
               console.warn(`Could not copy ${dll} to ${d} (already present or locked): ${e}`);
@@ -534,13 +753,22 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
       const proxyDxgi = path.join(proxySourceDir, 'dxgi.dll');
       if (fs.existsSync(proxyDxgi)) {
         for (const d of targetDirs) {
+          const owned = ownershipByDir.get(d)!;
+          const dstDxgi = path.join(d, 'dxgi.dll');
           try {
-            fs.copyFileSync(proxyDxgi, path.join(d, 'dxgi.dll'));
-            console.info(`Deployed dxgi.dll proxy bootstrap to ${d}`);
+            if (!fs.existsSync(dstDxgi) || owned.files.has('dxgi.dll')) {
+              fs.copyFileSync(proxyDxgi, dstDxgi);
+              owned.files.add('dxgi.dll');
+              console.info(`Deployed dxgi.dll proxy bootstrap to ${d}`);
+            }
           } catch (e) {
             console.warn(`Could not deploy dxgi.dll proxy to ${d} (may be locked by running game): ${e}`);
           }
         }
+      }
+
+      for (const [d, owned] of ownershipByDir.entries()) {
+        saveOwnership(d, owned);
       }
 
       // Ensure vrinject.json configuration is synchronized across all target binary directories
@@ -548,21 +776,24 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
       let baseProfile: Record<string, any> = {};
 
       const localProfileDirs = [
-        path.resolve(__dirname, '../../../../stereix-client/profiles'),
-        path.resolve(__dirname, '../../../../nexvr-client/profiles'),
-        path.resolve(__dirname, '../../../../profiles'),
-        path.resolve(__dirname, '../../../profiles'),
-        path.resolve(__dirname, '../../profiles'),
         path.join(process.resourcesPath, 'profiles'),
+        path.resolve(__dirname, '../../profiles'),
+        path.resolve(__dirname, '../../../profiles'),
+        path.resolve(__dirname, '../../../../profiles'),
+        path.resolve(__dirname, '../../../../stereix-client/profiles'),
       ];
       const otaProfileDir = path.join(app.getPath('userData'), 'updates', 'profiles');
+      // Last-writer-wins order (HIGH-10):
+      // - Dev mode (!app.isPackaged): local source profiles come LAST and always beat OTA.
+      // - Packaged mode: bundled profiles first, then cryptographically verified newer OTA profiles LAST.
       const profileDirs = (!app.isPackaged)
-        ? [otaProfileDir, ...localProfileDirs]
-        : [otaProfileDir, ...localProfileDirs];
+        ? [...localProfileDirs]
+        : (isOtaNewerAndVerified ? [...localProfileDirs, otaProfileDir] : [...localProfileDirs]);
       const exeBase = targetExeName ? path.basename(targetExeName, '.exe').toLowerCase() : '';
       for (const pDir of profileDirs) {
         try {
           if (fs.existsSync(pDir)) {
+            const isOtaDir = pDir === otaProfileDir;
             for (const f of fs.readdirSync(pDir)) {
               const lowerF = f.toLowerCase();
               let isMatch = f.startsWith(`${validId}_`) || f === `${validId}.json`;
@@ -573,8 +804,18 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
                 if (lowerF.includes('hogwarts') && (exeBase.includes('hogwarts') || exeBase.includes('phoenix') || validId.includes('hogwarts') || installPath.toLowerCase().includes('hogwarts'))) isMatch = true;
               }
               if (isMatch) {
-                const parsed = JSON.parse(fs.readFileSync(path.join(pDir, f), 'utf-8'));
-                if (parsed.srgbCorrection === false) parsed.srgbCorrection = true;
+                const profileFile = path.join(pDir, f);
+                const rawBuf = fs.readFileSync(profileFile);
+                if (isOtaDir) {
+                  const expectedHash = verifiedLocalManifest?.hashes?.[`profiles/${f}`];
+                  if (!expectedHash) continue;
+                  const actualHash = crypto.createHash('sha256').update(rawBuf).digest('hex').toLowerCase();
+                  if (actualHash !== expectedHash.toLowerCase()) {
+                    console.warn(`[SECURITY] OTA profile ${f} SHA-256 mismatch — ignoring.`);
+                    continue;
+                  }
+                }
+                const parsed = JSON.parse(rawBuf.toString('utf-8'));
                 delete parsed.telemetryOptIn; // F-4: Profile JSONs cannot override user privacy consent
                 baseProfile = { ...baseProfile, ...parsed };
                 break;
@@ -644,11 +885,15 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
         };
       }
 
-      let activeConfig: Record<string, any> = { ...baseProfile };
+      let activeConfig: Record<string, any> = {
+        srgbCorrection: baseProfile.srgbCorrection !== undefined ? baseProfile.srgbCorrection : true,
+        ...baseProfile,
+      };
       if (fs.existsSync(rootConfigPath)) {
         try {
           const cur = JSON.parse(fs.readFileSync(rootConfigPath, 'utf-8'));
-          // Preserve user preferences while enforcing curated profile architectural invariants
+          // Preserve explicit user preferences (including per-game srgbCorrection toggle, MED-03)
+          // while enforcing curated profile architectural invariants.
           activeConfig = {
             ...cur,
             ...(baseProfile.engine ? { engine: baseProfile.engine } : {}),
@@ -656,21 +901,15 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
             ...(baseProfile.reverseZ !== undefined ? { reverseZ: baseProfile.reverseZ } : {}),
             ...(baseProfile.rowMajorMatrices !== undefined ? { rowMajorMatrices: baseProfile.rowMajorMatrices } : {}),
             ...(baseProfile.matrixPrecision ? { matrixPrecision: baseProfile.matrixPrecision } : {}),
-            ...(baseProfile.srgbCorrection !== undefined ? { srgbCorrection: baseProfile.srgbCorrection } : {}),
+            srgbCorrection: cur.srgbCorrection !== undefined
+              ? cur.srgbCorrection
+              : (baseProfile.srgbCorrection !== undefined ? baseProfile.srgbCorrection : true),
             ...(baseProfile.depthSubmission !== undefined ? { depthSubmission: baseProfile.depthSubmission } : {}),
             ...(baseProfile.contrast !== undefined ? { contrast: baseProfile.contrast } : (cur.contrast !== undefined ? { contrast: cur.contrast } : {})),
             ...(baseProfile.saturation !== undefined ? { saturation: baseProfile.saturation } : (cur.saturation !== undefined ? { saturation: cur.saturation } : {})),
             ...(baseProfile.brightness !== undefined ? { brightness: baseProfile.brightness } : (cur.brightness !== undefined ? { brightness: cur.brightness } : {})),
           };
         } catch {}
-      }
-
-      // Universal Desktop 1:1 Color Fidelity Invariant:
-      // Game backbuffers are display-ready sRGB. OpenXR compositor applies display gamma decode (c^(1/2.2)),
-      // which without srgbCorrection results in washed-out milky blacks (e.g. 0.05 becomes 0.256, 5x brighter).
-      // srgbCorrection MUST ALWAYS be true to perform the exact pow(c, 2.2f) transfer cancellation.
-      if (activeConfig.srgbCorrection !== true) {
-        activeConfig.srgbCorrection = true;
       }
 
       delete activeConfig.telemetryOptIn; // M-6: Ensure planted vrinject.json or profile never overrides telemetry consent
@@ -707,104 +946,122 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
     activeGameId = validId;
     cancelInjectionFlag = false;
 
-    emitLogLine(event, `[Injector] Waiting up to 120s for: ${targetExeName}`);
+    // Step 3: Launch ONLY if the game is not already running; otherwise attach cleanly.
+    if (alreadyRunning) {
+      emitLogLine(
+        event,
+        `[Injector] Detected already-running game process: ${targetExeName} (PID ${alreadyRunning.pid}, ${Math.round(alreadyRunning.memory / 1024)} MB) — attaching without relaunching.`
+      );
+    } else {
+      emitLogLine(event, `[Injector] Assets synchronized. Launching target game (${targetExeName})...`);
+      if (validId.startsWith('custom_') && gameExeMap[validId]) {
+        const customExe = canonicalExistingPath(gameExeMap[validId], 'file');
+        resolveWithinRoot(installPath, path.relative(installPath, customExe));
+        // M-9: Use shell.openPath directly to eliminate cmd.exe %VAR% expansion and command injection
+        await shell.openPath(customExe);
+      } else if (/^\d+$/.test(validId)) {
+        await shell.openExternal(`steam://rungameid/${validId}`);
+      } else {
+        await shell.openExternal(
+          `com.epicgames.launcher://apps/${encodeURIComponent(validId)}?action=launch&silent=true`
+        );
+      }
+      emitLogLine(event, `[Injector] Waiting up to 120s for ${targetExeName} to initialize...`);
+    }
 
+    // Step 4: Wait for a stable, initialized game process before triggering UAC elevation.
+    // On cold launches (especially Unreal Engine + Steam titles), the shipping binary may
+    // briefly spawn at low memory or restart under SteamAPI_RestartAppIfNecessary. Waiting
+    // for PID stability + real working memory / visible window avoids premature UAC failures.
     let targetPid = 0;
+    let stablePid = 0;
+    let stableSinceMs = 0;
+    let loggedInitialDetect = false;
+
     for (let attempts = 0; attempts < 240; attempts++) {
       if (cancelInjectionFlag) {
         stopActiveLogWatch();
         return { success: false, cancelled: true, message: 'Cancelled by user.' };
       }
 
-      await new Promise(resolve => setTimeout(resolve, 500));
-      try {
-        const { stdout } = await execFileAsync(
-          'tasklist.exe',
-          ['/fi', `IMAGENAME eq ${targetExeName}`, '/fo', 'csv', '/nh'],
-          { encoding: 'utf-8', timeout: 2000, killSignal: 'SIGKILL', windowsHide: true }
-        );
-
-        const candidates: Array<{ pid: number; memory: number }> = [];
-        for (const line of stdout.split('\n')) {
-          if (!line.trim() || line.startsWith('INFO:')) continue;
-          const parts = line.split('","');
-          if (parts.length < 5) continue;
-          const exeName = parts[0].replace(/"/g, '').toLowerCase();
-          const pid = Number.parseInt(parts[1].replace(/"/g, ''), 10);
-          const memory = Number.parseInt(
-            parts[4].replace(/"/g, '').replace(/,/g, '').replace(/\s*K\s*$/i, ''),
-            10
-          );
-          // Filter out processes with invalid PID or negligible memory (e.g. zombie processes < 5MB)
-          if (exeName === targetExeName && Number.isSafeInteger(pid) && memory > 5000) {
-            candidates.push({ pid, memory: Number.isFinite(memory) ? memory : 0 });
-          }
-        }
-
-        // Prefer shipping binary in subfolders (e.g. Phoenix/Binaries/Win64) or processes with genuine game memory
-        let selectedCandidate: { pid: number; memory: number; path: string } | null = null;
-        for (const candidate of candidates) {
-          const processPath = await getProcessPath(candidate.pid).catch(() => '');
-          if (!processPath) continue;
-
-          const isInsideInstall = processPath.toLowerCase().startsWith(path.resolve(installPath).toLowerCase());
-          if (!isInsideInstall) continue;
-
-          const lowerPath = processPath.toLowerCase();
-          const isShippingBinary = lowerPath.includes('binaries') || lowerPath.includes('shipping');
-          
-          // If this is the heavy shipping binary or has > 50MB memory, select it immediately!
-          if (isShippingBinary || candidate.memory > 50000) {
-            selectedCandidate = { ...candidate, path: processPath };
-            break;
-          }
-
-          // Otherwise keep as fallback (in case it's an indie title without subfolders)
-          if (!selectedCandidate) {
-            selectedCandidate = { ...candidate, path: processPath };
-          }
-        }
-
-        // Resilient Fallback: If getProcessPath was blocked by Windows token/security permissions
-        // (e.g. UAC / admin token restrictions on Steam titles like Sekiro), we already verified that
-        // tasklist.exe found targetExeName. Select the candidate with primary game memory.
-        if (!selectedCandidate && candidates.length > 0) {
-          const sorted = [...candidates].sort((a, b) => b.memory - a.memory);
-          const best = sorted[0];
-          if (best.memory > 30000 || attempts >= 20) {
-            selectedCandidate = {
-              pid: best.pid,
-              memory: best.memory,
-              path: path.join(targetExeDir, targetExeName),
-            };
-          }
-        }
-
-        if (selectedCandidate) {
-          // If it's a small stub (< 50MB) and not in Binaries, wait up to 15 seconds to let the real game spawn
-          const lowerPath = selectedCandidate.path.toLowerCase();
-          const isShippingBinary = lowerPath.includes('binaries') || lowerPath.includes('shipping');
-          if (!isShippingBinary && selectedCandidate.memory < 50000 && attempts < 30) {
-            // Keep waiting for the real game process to spawn!
-            continue;
-          }
-
-          targetPid = selectedCandidate.pid;
-          activeTargetPid = selectedCandidate.pid;
-          targetExeDir = path.dirname(selectedCandidate.path);
-          if (targetExeDir && path.resolve(targetExeDir) !== path.resolve(installPath)) {
-            const targetDirLog = path.join(targetExeDir, 'vrinject.log');
-            startWatchingLogFile(targetDirLog, event);
-          }
-          break;
-        }
-        if (targetPid > 0) break;
-      } catch {
-        // Process may not have started yet.
+      if (!alreadyRunning || attempts > 0) {
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
+
+      const selectedCandidate = await findRunningGameCandidate(
+        targetExeName,
+        installPath,
+        targetExeDir,
+        attempts >= 20
+      );
+
+      if (!selectedCandidate) {
+        if (stablePid !== 0) {
+          emitLogLine(event, `[Injector] Process PID ${stablePid} exited during startup — waiting for relaunched game process...`);
+          stablePid = 0;
+          stableSinceMs = 0;
+        }
+        continue;
+      }
+
+      const nowMs = Date.now();
+      if (selectedCandidate.pid !== stablePid) {
+        if (stablePid !== 0) {
+          emitLogLine(
+            event,
+            `[Injector] Game process PID changed (${stablePid} -> ${selectedCandidate.pid}) — stabilizing new PID...`
+          );
+        } else if (!alreadyRunning && !loggedInitialDetect) {
+          emitLogLine(
+            event,
+            `[Injector] Detected ${targetExeName} (PID ${selectedCandidate.pid}) — waiting for game window & memory readiness...`
+          );
+          loggedInitialDetect = true;
+        }
+        stablePid = selectedCandidate.pid;
+        stableSinceMs = nowMs;
+      }
+
+      const stableDurationMs = nowMs - stableSinceMs;
+
+      if (!alreadyRunning) {
+        const lowerPath = selectedCandidate.path.toLowerCase();
+        const isShippingBinary = lowerPath.includes('binaries') || lowerPath.includes('shipping');
+
+        // Small bootstrap stub (< 50MB) outside Binaries: wait up to 15s for the real child game binary.
+        if (!isShippingBinary && selectedCandidate.memory < 50000 && attempts < 30) {
+          continue;
+        }
+
+        const windowAndMemReady =
+          selectedCandidate.hasWindow && selectedCandidate.memory >= 120000 && stableDurationMs >= 3000;
+        const heavyMemReady =
+          selectedCandidate.memory >= 200000 && stableDurationMs >= 6000;
+        const fallbackStableReady =
+          selectedCandidate.memory >= 50000 && stableDurationMs >= 15000;
+
+        if (!windowAndMemReady && !heavyMemReady && !fallbackStableReady) {
+          continue;
+        }
+
+        emitLogLine(
+          event,
+          `[Injector] Game process ready: PID ${selectedCandidate.pid} (${Math.round(selectedCandidate.memory / 1024)} MB, window=${selectedCandidate.hasWindow ? 'ready' : 'pending'}, stable ${Math.round(stableDurationMs / 1000)}s).`
+        );
+      }
+
+      targetPid = selectedCandidate.pid;
+      activeTargetPid = selectedCandidate.pid;
+      targetExeDir = path.dirname(selectedCandidate.path);
+      if (targetExeDir && path.resolve(targetExeDir) !== path.resolve(installPath)) {
+        const targetDirLog = path.join(targetExeDir, 'vrinject.log');
+        startWatchingLogFile(targetDirLog, event);
+      }
+      break;
     }
 
     if (!targetPid) {
+      flushWatchedLogs(event);
       stopActiveLogWatch();
       sendDiscordTelemetry({
         gameId: validId,
@@ -825,12 +1082,21 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
     const sourceDll = pickPreferredAsset(canonicalDll, otaDll, 100000);
     let dllTarget = resolveWithinRoot(targetExeDir, 'vrinject.dll');
     
-    // Check if target directory DLL is up-to-date with the source binary.
-    // If the game was running and locked vrinject.dll, copying may have failed.
-    // Fall back to injecting sourceDll directly so SHA-256 verification succeeds.
+    // Check if target directory DLL matches sourceDll SHA-256 (not merely mtimeMs, which can be stale across upgrades/rollbacks).
+    // If missing, hash-mismatched, or locked by a running game, fall back to sourceDll so elevated vr-inject-cli verifies & deploys it.
     try {
       if (fs.existsSync(sourceDll)) {
-        if (!fs.existsSync(dllTarget) || fs.statSync(dllTarget).mtimeMs < fs.statSync(sourceDll).mtimeMs) {
+        const srcHash = crypto.createHash('sha256').update(fs.readFileSync(sourceDll)).digest('hex');
+        let dstMatches = false;
+        if (fs.existsSync(dllTarget)) {
+          try {
+            const dstHash = crypto.createHash('sha256').update(fs.readFileSync(dllTarget)).digest('hex');
+            dstMatches = (dstHash === srcHash);
+          } catch {
+            dstMatches = false;
+          }
+        }
+        if (!dstMatches) {
           try {
             fs.copyFileSync(sourceDll, dllTarget);
           } catch {
@@ -850,18 +1116,59 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
       };
     }
 
-    const escapePs = (str: string) => str.replace(/'/g, "''");
-    const copySources = (!app.isPackaged ? [canonicalBinSourceDir, updatesDir] : [updatesDir, canonicalBinSourceDir])
-      .filter(d => fs.existsSync(d)).join(';');
-    const effectiveCopySrc = copySources || canonicalBinSourceDir;
-    const hotfixFlag = (!app.isPackaged || process.env.NODE_ENV === 'development') ? ' --allow-unverified-hotfix' : '';
+    // CRIT-01 & CRIT-02 Hardening:
+    // 1. Write a restrictive-ACL JSON job file containing authToken, paths, and expected exe/install dir.
+    //    No secrets or user/game paths ever cross PowerShell string interpolation or process command lines!
+    // 2. Pass ONLY canonicalBinSourceDir (bundled/local signed resources) as copySrc so elevated CLI
+    //    never copies unverified support DLLs from user-writable %APPDATA%.
+    // 3. Pass cliSource and jobFilePath into PowerShell via pure Base64 UTF-8 ([A-Za-z0-9+/=]),
+    //    completely immune to ASCII/Unicode smart-quote breakout (U+2018/U+2019/etc.).
+    const jobsDir = path.join(app.getPath('userData'), 'jobs');
+    fs.mkdirSync(jobsDir, { recursive: true });
+    const jobNonce = crypto.randomBytes(16).toString('hex');
+    const jobFilePath = path.join(jobsDir, `job_${jobNonce}.json`);
+    const resultFilePath = path.join(jobsDir, `res_${jobNonce}.json`);
+    const jobPayload = {
+      authToken: process.env.STEREIX_AUTH_TOKEN || process.env.NEXVR_AUTH_TOKEN || '',
+      pid: targetPid,
+      dllPath: dllTarget,
+      copySrc: canonicalBinSourceDir,
+      copyDst: targetExeDir,
+      logPath,
+      expectedExeName: targetExeName,
+      expectedInstallPath: installPath,
+      resultFile: resultFilePath,
+      allowUnverifiedHotfix: !app.isPackaged || process.env.NODE_ENV === 'development',
+    };
+    fs.writeFileSync(jobFilePath, JSON.stringify(jobPayload), { encoding: 'utf-8', mode: 0o600 });
+    try {
+      const currentUser = process.env.USERNAME || '';
+      const userDomain = process.env.USERDOMAIN || '';
+      if (currentUser && /^[A-Za-z0-9._ -]+$/.test(currentUser)) {
+        const principal = (userDomain && /^[A-Za-z0-9._-]+$/.test(userDomain))
+          ? `${userDomain}\\${currentUser}`
+          : currentUser;
+        // Use locale-independent well-known SIDs for SYSTEM (*S-1-5-18) and Administrators (*S-1-5-32-544)
+        await execFileAsync(
+          'icacls.exe',
+          [jobFilePath, '/inheritance:r', '/grant:r', `${principal}:(R,W)`, '*S-1-5-18:(F)', '*S-1-5-32-544:(F)'],
+          { timeout: 3000, windowsHide: true }
+        ).catch(() => {});
+      }
+    } catch {}
+
+    const cleanupJobFiles = () => {
+      try { if (fs.existsSync(jobFilePath)) fs.unlinkSync(jobFilePath); } catch {}
+      try { if (fs.existsSync(resultFilePath)) fs.unlinkSync(resultFilePath); } catch {}
+    };
+
+    const cliB64 = Buffer.from(cliSource, 'utf-8').toString('base64');
+    const jobB64 = Buffer.from(jobFilePath, 'utf-8').toString('base64');
     const innerScript =
-      `$env:STEREIX_AUTH_TOKEN = '${escapePs(process.env.STEREIX_AUTH_TOKEN || '')}'; ` +
-      `$env:NEXVR_AUTH_TOKEN = '${escapePs(process.env.NEXVR_AUTH_TOKEN || '')}'; ` +
-      `& '${escapePs(cliSource)}' --pid ${targetPid} --dll '${escapePs(dllTarget)}' ` +
-      `--copy-src '${escapePs(effectiveCopySrc)}' --copy-dst '${escapePs(targetExeDir)}'${hotfixFlag} ` +
-      `*>&1 | Out-File -LiteralPath '${escapePs(logPath)}' -Append -Encoding utf8; ` +
-      `if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
+      `$cli = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${cliB64}')); ` +
+      `$job = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${jobB64}')); ` +
+      `& $cli --job-file $job; ` +
+      `exit $LASTEXITCODE`;
     const base64Inner = Buffer.from(innerScript, 'utf16le').toString('base64');
     const outerScript =
       `$p = Start-Process powershell -Verb RunAs -Wait -PassThru -WindowStyle Hidden ` +
@@ -876,6 +1183,9 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
         if (resolved) return;
         resolved = true;
         clearTimeout(timeout);
+        cleanupJobFiles();
+        // Flush any newly written CLI output before stopping log watchers so the UI sees root cause lines
+        flushWatchedLogs(event);
         if (!result.success) stopActiveLogWatch();
         resolve(result);
       };
@@ -895,33 +1205,40 @@ ipcMain.handle('inject:deploy', async (event, id: string): Promise<InjectResult>
           killSignal: 'SIGKILL',
           cwd: installPath,
           windowsHide: true,
-          env: {
-            ...process.env,
-            NEXVR_AUTH_TOKEN: process.env.NEXVR_AUTH_TOKEN || '',
-            NEXVR_CLI: cliSource,
-            NEXVR_PID: String(targetPid),
-            NEXVR_DLL: dllTarget,
-            NEXVR_COPY_SRC: canonicalBinSourceDir,
-            NEXVR_COPY_DST: targetExeDir,
-            NEXVR_LOG: logPath,
-          },
         },
         (error) => {
+          // Ensure the final lines written by vr-inject-cli.exe are flushed into the UI log stream
+          flushWatchedLogs(event);
+
           if (error) {
-            let cleanMsg = error.message;
-            if (cleanMsg.includes('-EncodedCommand')) {
-              cleanMsg = 'Injection process failed (Exit code non-zero). Check session log for root cause details.';
-            }
+            const { message: cliReason, isUacCancelled } = extractCliFailureReason(logPath, error);
+            emitLogLine(event, `[Injector] ${cliReason}`);
             sendDiscordTelemetry({
               gameId: validId,
               gameName: targetExeName || validId,
               status: 'error',
-              message: `Injection CLI failed: ${cleanMsg}`,
+              message: `Injection CLI failed: ${cliReason}`,
               config: activeSessionConfig,
               logFilePath: currentSessionLogPath || latestSessionLogPath,
             }).catch(() => {});
-            finish({ success: false, message: cleanMsg });
+            finish({
+              success: false,
+              cancelled: isUacCancelled,
+              message: cliReason,
+            });
           } else {
+            // Read back post-UAC re-resolved PID from elevated CLI so monitor/cancel stay synchronized (CRIT-02)
+            try {
+              if (fs.existsSync(resultFilePath)) {
+                const resJson = JSON.parse(fs.readFileSync(resultFilePath, 'utf-8'));
+                if (Number.isSafeInteger(resJson?.resolvedPid) && resJson.resolvedPid > 4 && resJson.resolvedPid !== targetPid) {
+                  targetPid = resJson.resolvedPid;
+                  activeTargetPid = targetPid;
+                  emitLogLine(event, `[Injector] Re-resolved live game PID after UAC: ${targetPid}`);
+                }
+              }
+            } catch {}
+
             activeSessionStartTime = Date.now();
             sendDiscordTelemetry({
               gameId: validId,
@@ -1003,51 +1320,106 @@ ipcMain.handle('inject:uninstall', async (event, id: string) => {
   const installPath = canonicalExistingPath(registeredInstallPath, 'directory');
 
   try {
-    let targetExeDir = installPath;
+    // Collect EVERY deployed directory under installPath (deploy writes to installPath, targetExeDir, and Binaries/Win64)
+    // without ever traversing symlinks or NTFS junctions (MED-04).
+    const dirsToClean = new Set<string>([installPath]);
     const registeredExe = gameExeMap[validId];
     if (registeredExe) {
-      targetExeDir = path.dirname(canonicalExistingPath(registeredExe, 'file'));
-    } else {
-      // Locate directory where vrinject.dll was deployed
-      const scanForVrinject = (dir: string, depth = 0): string | null => {
-        if (depth > 6) return null;
+      try {
+        const canonicalExe = canonicalExistingPath(registeredExe, 'file');
+        resolveWithinRoot(installPath, path.relative(installPath, canonicalExe));
+        dirsToClean.add(path.dirname(canonicalExe));
+      } catch {}
+    }
+    for (const sub of ['Phoenix/Binaries/Win64', 'Chameleon/Binaries/Win64', 'Dungeonhaven/Binaries/Win64', 'Binaries/Win64']) {
+      try {
+        const subDir = resolveWithinRoot(installPath, sub);
+        if (fs.existsSync(subDir) && !fs.lstatSync(subDir).isSymbolicLink()) {
+          const canonicalSub = canonicalExistingPath(subDir, 'directory');
+          resolveWithinRoot(installPath, path.relative(installPath, canonicalSub));
+          dirsToClean.add(canonicalSub);
+        }
+      } catch {}
+    }
+    const scanForDeployedDirs = (dir: string, depth = 0): void => {
+      if (depth > 6) return;
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const e of entries) {
+          if (e.isSymbolicLink()) continue;
+          const lower = e.name.toLowerCase();
+          if (e.isFile() && (lower === 'vrinject.dll' || lower === '.stereix_deployed.json')) {
+            dirsToClean.add(dir);
+          } else if (e.isDirectory() && !lower.includes('support')) {
+            try {
+              const child = resolveWithinRoot(installPath, path.relative(installPath, path.join(dir, e.name)));
+              if (fs.lstatSync(child).isSymbolicLink()) continue;
+              const realChild = fs.realpathSync.native(child);
+              resolveWithinRoot(installPath, path.relative(installPath, realChild));
+              scanForDeployedDirs(realChild, depth + 1);
+            } catch {}
+          }
+        }
+      } catch {}
+    };
+    scanForDeployedDirs(installPath);
+
+    const stereixExclusiveFiles = new Set(['vrinject.dll', 'vrinject.log']);
+    const candidateFiles = ['dxgi.dll', 'd3d11.dll', 'vrinject.dll', 'onnxruntime.dll', 'DirectML.dll', 'openxr_loader.dll', 'vrinject.log'];
+    let removedCount = 0;
+
+    for (const dir of dirsToClean) {
+      // Remove ONLY Stereix-owned deployed VR injection files (MED-04: never delete pre-existing game DLLs/shaders)
+      const ownershipManifestPath = safeGamePath(dir, '.stereix_deployed.json');
+      let ownedFiles: Set<string> | null = null;
+      let ownedDirs: Set<string> | null = null;
+      if (fs.existsSync(ownershipManifestPath)) {
         try {
-          const entries = fs.readdirSync(dir, { withFileTypes: true });
-          for (const e of entries) {
-            if (e.isFile() && e.name.toLowerCase() === 'vrinject.dll') return dir;
-            if (e.isDirectory() && !e.name.toLowerCase().includes('support')) {
-              const res = scanForVrinject(path.join(dir, e.name), depth + 1);
-              if (res) return res;
-            }
+          if (!fs.lstatSync(ownershipManifestPath).isSymbolicLink()) {
+            const parsed = JSON.parse(fs.readFileSync(ownershipManifestPath, 'utf-8'));
+            ownedFiles = new Set<string>(Array.isArray(parsed.files) ? parsed.files : []);
+            ownedDirs = new Set<string>(Array.isArray(parsed.dirs) ? parsed.dirs : []);
           }
         } catch {}
-        return null;
-      };
-      const foundDir = scanForVrinject(installPath);
-      if (foundDir) targetExeDir = foundDir;
-    }
+      }
 
-    // Remove deployed VR injection files (including proxy DLLs to restore 100% native flat screen)
-    const filesToRemove = ['dxgi.dll', 'd3d11.dll', 'vrinject.dll', 'onnxruntime.dll', 'DirectML.dll', 'openxr_loader.dll', 'vrinject.log'];
-    let removedCount = 0;
-    for (const f of filesToRemove) {
-      const p = path.join(targetExeDir, f);
-      if (fs.existsSync(p)) {
+      for (const f of candidateFiles) {
+        // Shared runtime DLLs and proxy DLLs are only removed if recorded as Stereix-owned
+        const isOwned = stereixExclusiveFiles.has(f) || (ownedFiles !== null && ownedFiles.has(f));
+        if (!isOwned) continue;
+        const p = safeGamePath(dir, f);
+        if (fs.existsSync(p)) {
+          try {
+            if (!fs.lstatSync(p).isSymbolicLink()) {
+              fs.unlinkSync(p);
+              removedCount++;
+            }
+          } catch {}
+        }
+      }
+      for (const dirName of ['shaders', 'models']) {
+        if (ownedDirs !== null && ownedDirs.has(dirName)) {
+          const targetSub = safeGamePath(dir, dirName);
+          if (fs.existsSync(targetSub)) {
+            try {
+              if (!fs.lstatSync(targetSub).isSymbolicLink()) {
+                fs.rmSync(targetSub, { recursive: true, force: true });
+                removedCount++;
+              }
+            } catch {}
+          }
+        }
+      }
+      if (fs.existsSync(ownershipManifestPath)) {
         try {
-          fs.unlinkSync(p);
-          removedCount++;
+          if (!fs.lstatSync(ownershipManifestPath).isSymbolicLink()) {
+            fs.unlinkSync(ownershipManifestPath);
+          }
         } catch {}
       }
     }
-    const shadersDir = path.join(targetExeDir, 'shaders');
-    if (fs.existsSync(shadersDir)) {
-      try {
-        fs.rmSync(shadersDir, { recursive: true, force: true });
-        removedCount++;
-      } catch {}
-    }
 
-    console.info(`[Injector] Uninstalled VR mod from: ${targetExeDir} (${removedCount} files removed)`);
+    console.info(`[Injector] Uninstalled VR mod from ${dirsToClean.size} directory(ies) under ${installPath} (${removedCount} items removed)`);
     return {
       success: true,
       message: 'VR Mod uninstalled successfully. Game is now restored to original flat screen mode.'

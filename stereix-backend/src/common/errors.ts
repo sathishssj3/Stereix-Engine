@@ -71,8 +71,10 @@ export function errorHandler(
   }
 
   logger.error({ err }, 'Unhandled application error');
+  // HIGH-02: Only expose raw error messages in explicit development/test environments (fail-closed when NODE_ENV is unset)
+  const isVerboseEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
   res.status(500).json({
     status: 'error',
-    message: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
+    message: isVerboseEnv ? err.message : 'Internal server error',
   });
 }

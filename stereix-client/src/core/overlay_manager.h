@@ -20,6 +20,10 @@ public:
     void ToggleOverlay() { m_isVisible = !m_isVisible; }
     void SetOverlayVisible(bool visible) { m_isVisible = visible; }
 
+    // Override ImGui DisplaySize when rendering into a dedicated OpenXR HUD quad swapchain
+    void SetRenderTargetSize(float width, float height) { m_overrideWidth = width; m_overrideHeight = height; }
+    void ClearRenderTargetSize() { m_overrideWidth = 0.0f; m_overrideHeight = 0.0f; }
+
     // Feeds physical or virtual gamepad inputs directly into Dear ImGui navigation
     void FeedGamepadInput(const XINPUT_GAMEPAD& pad);
 
@@ -34,6 +38,8 @@ private:
     bool m_initialized = false;
     bool m_isVisible = false; // Hide by default so we don't render the uninitialized quad
     HWND m_hwnd = nullptr;
+    float m_overrideWidth = 0.0f;
+    float m_overrideHeight = 0.0f;
     std::mutex m_mutex;
 };
 

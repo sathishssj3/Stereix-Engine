@@ -1,7 +1,15 @@
 import { app, ipcMain } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
-import { assertTrustedIpcSender } from './utils';
+import {
+  assertTrustedIpcSender,
+  canonicalExistingPath,
+  gameExeMap,
+  gamePathsMap,
+  resolveWithinRoot,
+  safeGamePath,
+  validateGameId,
+} from './utils';
 import { invalidateProfileCache } from './configManager';
 
 export interface AIProfileRequest {
@@ -42,23 +50,28 @@ interface LocalGameScanResult {
 }
 
 /**
- * Collects candidate search directories (game root, exe folder, up to 2 parent directories).
+ * Collects candidate search directories strictly contained within the verified game install root.
  */
-function getCandidateDirectories(gameDir: string, exePath?: string): string[] {
+function getCandidateDirectories(gameRoot: string, exePath?: string): string[] {
   const dirs = new Set<string>();
-  if (gameDir && fs.existsSync(gameDir)) {
-    dirs.add(path.resolve(gameDir));
-    try {
-      dirs.add(path.resolve(gameDir, '..'));
-    } catch {}
-  }
+  if (!gameRoot || !fs.existsSync(gameRoot)) return [];
+  const canonicalRoot = path.resolve(gameRoot);
+  dirs.add(canonicalRoot);
+
   if (exePath && fs.existsSync(exePath)) {
-    const exeDir = path.dirname(exePath);
-    dirs.add(path.resolve(exeDir));
     try {
-      dirs.add(path.resolve(exeDir, '..'));
-      dirs.add(path.resolve(exeDir, '..', '..'));
-    } catch {}
+      let cur = path.resolve(path.dirname(exePath));
+      for (let depth = 0; depth < 3; depth++) {
+        resolveWithinRoot(canonicalRoot, path.relative(canonicalRoot, cur));
+        dirs.add(cur);
+        if (cur === canonicalRoot) break;
+        const parent = path.dirname(cur);
+        if (parent === cur) break;
+        cur = parent;
+      }
+    } catch {
+      // exePath is outside gameRoot; ignore it
+    }
   }
   return Array.from(dirs).filter(d => fs.existsSync(d));
 }
@@ -241,13 +254,19 @@ function scanGameDirectory(gameDir: string, exePath?: string, gameName?: string)
     result.foundMarkers.push('DirectML NPU/GPU Acceleration');
   }
 
-  // Scan primary executable binary header if available
-  if (exePath && fs.existsSync(exePath)) {
+  // Scan primary executable binary header if available (strictly within gameDir, try/finally FD cleanup)
+  if (exePath && gameDir && fs.existsSync(exePath)) {
     try {
-      const fd = fs.openSync(exePath, 'r');
-      const headerBuf = Buffer.alloc(Math.min(4 * 1024 * 1024, fs.statSync(exePath).size)); // Read up to first 4MB
-      fs.readSync(fd, headerBuf, 0, headerBuf.length, 0);
-      fs.closeSync(fd);
+      const safeExe = resolveWithinRoot(gameDir, path.relative(gameDir, path.resolve(exePath)));
+      const fd = fs.openSync(safeExe, 'r');
+      let headerBuf: Buffer;
+      try {
+        const stat = fs.fstatSync(fd);
+        headerBuf = Buffer.alloc(Math.min(4 * 1024 * 1024, stat.size));
+        fs.readSync(fd, headerBuf, 0, headerBuf.length, 0);
+      } finally {
+        fs.closeSync(fd);
+      }
 
       const binaryStr = headerBuf.toString('latin1').toLowerCase();
 
@@ -564,10 +583,19 @@ function performReverseEngineeringReasoning(req: AIProfileRequest, scan: LocalGa
     `[DECISION] Production VR profile synthesized with 100% mathematical certainty. Zero hallucinations.`
   );
 
+  const safeProfileId = (() => {
+    const candidate = req.steamAppId || req.exeName?.replace(/\.exe$/i, '').replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase() || 'custom';
+    try {
+      return validateGameId(candidate);
+    } catch {
+      return 'custom';
+    }
+  })();
+
   const profile = {
     $schema: './schema.json',
-    id: req.steamAppId || req.exeName?.replace(/\.exe$/i, '').toLowerCase() || 'custom',
-    name: req.gameName,
+    id: safeProfileId,
+    name: String(req.gameName || 'Unknown Game').slice(0, 128),
     engine: engineSetting,
     api: api,
     reverseZ: reverseZ,
@@ -591,33 +619,97 @@ function performReverseEngineeringReasoning(req: AIProfileRequest, scan: LocalGa
 }
 
 /**
+ * Resolves and strictly validates game install directory + executable path against
+ * the main process's authoritative gamePathsMap/gameExeMap registry (CRIT-05).
+ */
+function resolveAuthorizedGamePaths(req: AIProfileRequest): {
+  validId: string;
+  installPath: string;
+  exePath?: string;
+} {
+  if (!req || typeof req !== 'object') {
+    throw new Error('Invalid AI profile request');
+  }
+
+  let validId = '';
+  let registeredInstall = '';
+
+  if (typeof req.steamAppId === 'string' && req.steamAppId.length > 0) {
+    validId = validateGameId(req.steamAppId);
+    registeredInstall = gamePathsMap[validId] || '';
+  }
+
+  if (!registeredInstall && typeof req.installPath === 'string' && req.installPath.length > 0) {
+    const requestedCanonical = canonicalExistingPath(req.installPath, 'directory');
+    for (const [id, mappedPath] of Object.entries(gamePathsMap)) {
+      try {
+        if (canonicalExistingPath(mappedPath, 'directory').toLowerCase() === requestedCanonical.toLowerCase()) {
+          validId = validateGameId(id);
+          registeredInstall = mappedPath;
+          break;
+        }
+      } catch {}
+    }
+  }
+
+  if (!registeredInstall || !validId) {
+    throw new Error('Unauthorized game path: game is not registered in library');
+  }
+
+  const installPath = canonicalExistingPath(registeredInstall, 'directory');
+  let exePath: string | undefined;
+
+  const registeredExe = gameExeMap[validId];
+  const candidateExe = registeredExe || req.exeName;
+  if (typeof candidateExe === 'string' && candidateExe.length > 0 && path.isAbsolute(candidateExe)) {
+    try {
+      const canonicalExe = canonicalExistingPath(candidateExe, 'file');
+      resolveWithinRoot(installPath, path.relative(installPath, canonicalExe));
+      exePath = canonicalExe;
+    } catch {
+      // Ignore exe paths outside the registered game install directory
+      exePath = undefined;
+    }
+  }
+
+  return { validId, installPath, exePath };
+}
+
+/**
  * Production-ready local reverse-engineering engine for Stereix Engine.
  * Runs 100% locally on the user's PC with zero cloud dependency.
  */
-export async function generateVRProfileWithAI(req: AIProfileRequest): Promise<{ profile: any; source: 'local_ai'; reasoning: string }> {
-  const gameDir = req.installPath || (req.exeName ? path.dirname(req.exeName) : '');
-  const scan = scanGameDirectory(gameDir, req.exeName, req.gameName);
-  const result = performReverseEngineeringReasoning(req, scan);
+export async function generateVRProfileWithAI(
+  req: AIProfileRequest,
+  authorizedPaths?: { validId: string; installPath: string; exePath?: string }
+): Promise<{ profile: any; source: 'local_ai'; reasoning: string }> {
+  const auth = authorizedPaths || resolveAuthorizedGamePaths(req);
+  const safeReq: AIProfileRequest = {
+    ...req,
+    steamAppId: auth.validId,
+    installPath: auth.installPath,
+    exeName: auth.exePath,
+  };
+  const scan = scanGameDirectory(auth.installPath, auth.exePath, safeReq.gameName);
+  const result = performReverseEngineeringReasoning(safeReq, scan);
 
-  // Automatically deploy vrinject.json directly into candidate game directories
-  const targetDirs = new Set<string>();
+  // Automatically deploy vrinject.json strictly inside authorized game directories
+  const targetDirs = new Set<string>([auth.installPath]);
   const cwd = path.resolve(process.cwd());
-  if (gameDir && fs.existsSync(gameDir)) {
-    const resolved = path.resolve(gameDir);
-    if (resolved !== cwd) {
-      targetDirs.add(resolved);
-    }
-  }
-  if (req.exeName && fs.existsSync(req.exeName)) {
-    const resolved = path.resolve(path.dirname(req.exeName));
-    if (resolved !== cwd) {
-      targetDirs.add(resolved);
-    }
+  if (auth.exePath) {
+    const exeDir = path.dirname(auth.exePath);
+    try {
+      resolveWithinRoot(auth.installPath, path.relative(auth.installPath, exeDir));
+      if (path.resolve(exeDir) !== cwd) {
+        targetDirs.add(exeDir);
+      }
+    } catch {}
   }
 
   for (const dir of targetDirs) {
+    if (path.resolve(dir) === cwd) continue;
     try {
-      const vrinjectPath = path.join(dir, 'vrinject.json');
+      const vrinjectPath = safeGamePath(dir, 'vrinject.json');
       fs.writeFileSync(vrinjectPath, JSON.stringify(result.profile, null, 2), 'utf-8');
       console.log(`[Stereix Local AI] Deployed vrinject.json to ${vrinjectPath}`);
     } catch (err: any) {
@@ -629,9 +721,20 @@ export async function generateVRProfileWithAI(req: AIProfileRequest): Promise<{ 
 }
 
 /**
- * Saves a generated profile to the local disk cache so configManager picks it up immediately
+ * Saves a generated profile to the local disk cache so configManager picks it up immediately.
+ * Strictly validates profile.id and enforces resolveWithinRoot containment (CRIT-05).
  */
 export function saveProfileToCache(profile: any, profilesDir?: string): string {
+  if (!profile || typeof profile !== 'object') {
+    throw new Error('Invalid profile object');
+  }
+  const safeId = validateGameId(String(profile.id || 'custom'));
+  const safeSlug = String(profile.name || 'game')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '_')
+    .slice(0, 64) || 'game';
+  const fileName = `${safeId}_${safeSlug}.json`;
+
   // 1. Primary persistence: custom_profiles in userData
   let userDataDir = '';
   try {
@@ -639,24 +742,30 @@ export function saveProfileToCache(profile: any, profilesDir?: string): string {
   } catch {
     userDataDir = path.resolve(__dirname, '..', '..');
   }
-  const customDir = profilesDir || path.join(userDataDir, 'custom_profiles');
+  const customDir = path.resolve(profilesDir || path.join(userDataDir, 'custom_profiles'));
   if (!fs.existsSync(customDir)) {
     fs.mkdirSync(customDir, { recursive: true });
   }
 
-  const fileName = `${profile.id}_${(profile.name || 'game').toLowerCase().replace(/[^a-z0-9]/g, '_')}.json`;
-  const filePath = path.join(customDir, fileName);
+  const filePath = resolveWithinRoot(customDir, fileName);
 
-  fs.writeFileSync(filePath, JSON.stringify(profile, null, 2), 'utf-8');
+  const sanitizedProfile = { ...profile, id: safeId };
+  delete sanitizedProfile.telemetryOptIn;
+  const serialized = JSON.stringify(sanitizedProfile, null, 2);
+  if (Buffer.byteLength(serialized, 'utf-8') > 16384) {
+    throw new Error('Profile payload exceeds maximum allowed size (16KB)');
+  }
+
+  fs.writeFileSync(filePath, serialized, 'utf-8');
   console.log(`[Stereix Profile Cache] Saved AI profile to ${filePath}`);
 
-  // 2. Secondary persistence: check developer profiles directory
-  const devDir = path.resolve(__dirname, '../../../../nexvr-client/profiles');
-  const stereixDevDir = path.resolve(__dirname, '../../../../stereix-client/profiles');
-  for (const d of [devDir, stereixDevDir]) {
-    if (fs.existsSync(d)) {
+  // 2. Secondary persistence (dev mode only): developer profiles directory
+  if (!app.isPackaged) {
+    const stereixDevDir = path.resolve(__dirname, '../../../../stereix-client/profiles');
+    if (fs.existsSync(stereixDevDir)) {
       try {
-        fs.writeFileSync(path.join(d, fileName), JSON.stringify(profile, null, 2), 'utf-8');
+        const devTarget = resolveWithinRoot(stereixDevDir, fileName);
+        fs.writeFileSync(devTarget, serialized, 'utf-8');
       } catch {}
     }
   }
@@ -673,7 +782,8 @@ export function saveProfileToCache(profile: any, profilesDir?: string): string {
 if (ipcMain && typeof ipcMain.handle === 'function') {
   ipcMain.handle('stereix:request-ai-profile', async (event, req: AIProfileRequest) => {
     assertTrustedIpcSender(event);
-    const result = await generateVRProfileWithAI(req);
+    const auth = resolveAuthorizedGamePaths(req);
+    const result = await generateVRProfileWithAI(req, auth);
     try {
       saveProfileToCache(result.profile);
     } catch (err: any) {
@@ -684,14 +794,55 @@ if (ipcMain && typeof ipcMain.handle === 'function') {
 
   ipcMain.handle('stereix:tune-ai-profile', async (event, req: AITuneRequest) => {
     assertTrustedIpcSender(event);
-    const tuned = { ...req.currentProfile };
+    if (!req || typeof req !== 'object' || !req.currentProfile || typeof req.currentProfile !== 'object' || Array.isArray(req.currentProfile)) {
+      throw new Error('Invalid tune request');
+    }
+    if (typeof req.userFeedback !== 'string' || req.userFeedback.length > 1000) {
+      throw new Error('Invalid userFeedback');
+    }
+    const rawSize = Buffer.byteLength(JSON.stringify(req.currentProfile), 'utf-8');
+    if (rawSize > 16384) {
+      throw new Error('Profile payload too large');
+    }
+    const safeId = validateGameId(String(req.currentProfile.id || ''));
+    if (!gamePathsMap[safeId]) {
+      throw new Error('Unauthorized game profile: game is not registered in library');
+    }
+    const src = req.currentProfile;
+    const clamp = (val: unknown, defVal: number, lo: number, hi: number): number => {
+      const n = Number(val);
+      return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : defVal;
+    };
+    const tuned: Record<string, any> = {
+      id: safeId,
+      name: typeof src.name === 'string' ? src.name.slice(0, 128) : safeId,
+      engine: typeof src.engine === 'string' ? src.engine.slice(0, 64) : 'Generic',
+      api: typeof src.api === 'string' ? src.api.slice(0, 32) : 'DX12',
+      reverseZ: typeof src.reverseZ === 'boolean' ? src.reverseZ : true,
+      rowMajorMatrices: typeof src.rowMajorMatrices === 'boolean' ? src.rowMajorMatrices : true,
+      matrixPrecision: typeof src.matrixPrecision === 'string' ? src.matrixPrecision.slice(0, 32) : 'Float32',
+      motionAimSensitivity: clamp(src.motionAimSensitivity, 1.0, 0.1, 10.0),
+      useRecommendedResolution: src.useRecommendedResolution !== false,
+      srgbCorrection: typeof src.srgbCorrection === 'boolean' ? src.srgbCorrection : true,
+      depthSubmission: Boolean(src.depthSubmission),
+      rawInputMode: src.rawInputMode !== false,
+      autoInjectOnLaunch: src.autoInjectOnLaunch !== false,
+      ipd: clamp(src.ipd, 0.064, 0.045, 0.085),
+      convergence: clamp(src.convergence, 3.0, 0.2, 50.0),
+      contrast: clamp(src.contrast, 1.0, 0.5, 2.0),
+      saturation: clamp(src.saturation, 1.0, 0.5, 2.0),
+      brightness: clamp(src.brightness, 1.0, 0.5, 2.0),
+      ...(typeof src.forceCinemaMode === 'boolean' ? { forceCinemaMode: src.forceCinemaMode } : {}),
+      ...(src.theaterDistance !== undefined ? { theaterDistance: clamp(src.theaterDistance, 2.5, 1.0, 20.0) } : {}),
+      ...(typeof src.aiNotes === 'string' ? { aiNotes: src.aiNotes.slice(0, 2000) } : {}),
+    };
     const fb = req.userFeedback.toLowerCase();
     if (fb.includes('intense') || fb.includes('strain') || fb.includes('headache')) {
-      tuned.convergence = Math.min((tuned.convergence || 3.0) + 0.8, 10.0);
+      tuned.convergence = Math.min(tuned.convergence + 0.8, 10.0);
     } else if (fb.includes('flat') || fb.includes('depth') || fb.includes('more 3d')) {
-      tuned.convergence = Math.max((tuned.convergence || 3.0) - 0.5, 1.2);
+      tuned.convergence = Math.max(tuned.convergence - 0.5, 1.2);
     } else if (fb.includes('dark')) {
-      tuned.brightness = (tuned.brightness || 1.0) * 1.15;
+      tuned.brightness = Math.min(tuned.brightness * 1.15, 2.0);
     }
     saveProfileToCache(tuned);
     return { success: true, profile: tuned, note: 'Tuned via local reverse-engineering heuristics' };

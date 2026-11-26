@@ -21,6 +21,10 @@ public:
     bool Initialize(ID3D12Device* device);
     void Shutdown();
 
+    // Waits on the next ring-buffer slot's fence and returns that slot index BEFORE
+    // DX12StereoResourceManager updates CBV/SRV descriptors for the frame (HIGH-08).
+    uint32_t PrepareNextFrameSlot(DX12FenceManager* fenceManager);
+
     // Renders the stereo reprojection. Returns true on success, false if degraded/skipped.
     // Enforces the single-queue constraint.
     bool RenderStereo(
@@ -34,7 +38,8 @@ public:
         ID3D12Resource* oxrLeftDest = nullptr,
         ID3D12Resource* oxrRightDest = nullptr,
         bool shouldAttemptStereo = true,
-        ID3D12Resource* uiMask = nullptr);
+        ID3D12Resource* uiMask = nullptr,
+        ID3D12Resource* oxrHudDest = nullptr);
 
 private:
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
@@ -42,6 +47,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandLists[MAX_FRAMES_IN_FLIGHT];
     uint64_t m_frameFences[MAX_FRAMES_IN_FLIGHT] = {0, 0, 0};
     uint32_t m_currentFrameIndex = 0;
+    bool m_hasPreparedSlot = false;
+    uint32_t m_preparedSlotIndex = 0;
     
     mutable std::mutex m_mutex;
     

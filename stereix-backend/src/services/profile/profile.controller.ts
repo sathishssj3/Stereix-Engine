@@ -4,18 +4,25 @@ import { ProfileService } from './profile.service.js';
 
 const profileService = new ProfileService();
 
+const boundedConfigJsonSchema = z
+  .record(z.any())
+  .refine(
+    (val) => Buffer.byteLength(JSON.stringify(val), 'utf8') <= 32768,
+    'configJson exceeds maximum allowed size of 32KB'
+  );
+
 const createProfileSchema = z.object({
   gameId: z.string().uuid(),
   name: z.string().min(1).max(100),
-  description: z.string().optional(),
-  configJson: z.record(z.any()),
+  description: z.string().max(1000).optional(),
+  configJson: boundedConfigJsonSchema,
   isOfficial: z.boolean().optional(),
 });
 
 const updateProfileSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  description: z.string().optional(),
-  configJson: z.record(z.any()).optional(),
+  description: z.string().max(1000).optional(),
+  configJson: boundedConfigJsonSchema.optional(),
 });
 
 export class ProfileController {

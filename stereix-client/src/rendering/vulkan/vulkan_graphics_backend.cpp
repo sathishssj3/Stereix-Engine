@@ -202,7 +202,7 @@ bool VulkanGraphicsBackend::CreateGPUResources() {
     // --- Camera Uniform Buffer (512 bytes = expanded StereoShaderConstants) ---
     VkBufferCreateInfo bufInfo{};
     bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufInfo.size = 512; // Expanded StereoShaderConstants for P0.2/P1.1/P1.2/P2
+    bufInfo.size = sizeof(StereoShaderConstants); // 512 bytes (HIGH-07)
     bufInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
     bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -222,11 +222,12 @@ bool VulkanGraphicsBackend::CreateGPUResources() {
         return false;
     dt->BindBufferMemory(m_device, m_cameraBuffer, m_cameraBufferMemory, 0);
 
-    // Write zeros into the buffer initially
+    // Write zeros into the full 512-byte UBO initially
     void* mapped = nullptr;
-    dt->MapMemory(m_device, m_cameraBufferMemory, 0, 256, 0, &mapped);
-    memset(mapped, 0, 256);
-    dt->UnmapMemory(m_device, m_cameraBufferMemory);
+    if (dt->MapMemory(m_device, m_cameraBufferMemory, 0, sizeof(StereoShaderConstants), 0, &mapped) == VK_SUCCESS && mapped) {
+        memset(mapped, 0, sizeof(StereoShaderConstants));
+        dt->UnmapMemory(m_device, m_cameraBufferMemory);
+    }
 
     // --- Depth Image (D32_SFLOAT, 1920x1080) ---
     VkImageCreateInfo imgInfo{};
@@ -437,12 +438,37 @@ void VulkanGraphicsBackend::RenderStereo(
             shaderConsts.horizonLockStrength = 0.0f;
         }
 
+        for (int i = 0; i < 4; ++i) {
+            shaderConsts.leftEyeFovTan[i] = leftEye.fovTan[i];
+            shaderConsts.rightEyeFovTan[i] = rightEye.fovTan[i];
+        }
+        float aspect = (shaderConsts.height > 0)
+            ? (static_cast<float>(shaderConsts.width) / static_cast<float>(shaderConsts.height))
+            : (16.0f / 9.0f);
+        if (aspect < 0.5f || aspect > 4.0f) aspect = 16.0f / 9.0f;
+
+        float gameTanX = 1.0f;
+        float gameTanY = 1.0f / aspect;
+        float p00 = std::abs(camSnapshot.projection.m[0][0]);
+        float p11 = std::abs(camSnapshot.projection.m[1][1]);
+        if (p00 > 0.25f && p00 < 5.0f && p11 > 0.25f && p11 < 5.0f) {
+            gameTanX = (std::min)(1.85f, (std::max)(0.45f, 1.0f / p00));
+            gameTanY = (std::min)(1.40f, (std::max)(0.25f, 1.0f / p11));
+        }
+        shaderConsts.gameTanHalfFovX = gameTanX;
+        shaderConsts.gameTanHalfFovY = gameTanY;
+        shaderConsts.stereoIpd = (params.ipd > 0.01f) ? params.ipd : 0.064f;
+        shaderConsts.stereoConvergence = (params.convergence > 0.1f) ? params.convergence : 3.5f;
+        shaderConsts.isReversedZ = camSnapshot.reversedZ ? 1u : 0u;
+        shaderConsts.isLeftHanded = camSnapshot.isLeftHanded ? 1u : 0u;
+        shaderConsts.nearPlane = (params.nearPlane > 0.001f) ? params.nearPlane : 0.1f;
+        shaderConsts.farPlane = (params.farPlane > shaderConsts.nearPlane) ? params.farPlane : 1000.0f;
+
         auto dt = VulkanDispatchTable::Get().GetDeviceDispatch(m_device);
         if (!dt) return;
 
         void* mapped = nullptr;
-        dt->MapMemory(m_device, m_cameraBufferMemory, 0, 512, 0, &mapped);
-        if (mapped) {
+        if (dt->MapMemory(m_device, m_cameraBufferMemory, 0, sizeof(StereoShaderConstants), 0, &mapped) == VK_SUCCESS && mapped) {
             memcpy(mapped, &shaderConsts, sizeof(StereoShaderConstants));
             dt->UnmapMemory(m_device, m_cameraBufferMemory);
         }
@@ -493,7 +519,7 @@ void VulkanGraphicsBackend::RenderStereo(
         }
 
         bool ok = m_renderer->Render(camSnapshot, effectiveDepth,
-                           m_cameraBuffer, 256, m_gameColorView, m_depthImageView ? m_depthImageView : m_gameColorView,
+                           m_cameraBuffer, sizeof(StereoShaderConstants), m_gameColorView, m_depthImageView ? m_depthImageView : m_gameColorView,
                            *m_resourceManager, *m_pipelineCache, *m_descriptorManager,
                            *m_commandManager, *m_syncManager, *m_stateTracker,
                            m_oxrLeftDest, m_oxrRightDest,
@@ -731,13 +757,96 @@ void VulkanGraphicsBackend::SubmitStereoFrame(
             }
             } // end if (!stereoOk)
 
-            // Handle floating HUD quad submission if UI layer is detected
+            // Handle floating HUD quad submission if UI layer is detected (MED-11 & HIGH-09)
             if (uiMaskHandle && oxrSwapchain && oxrSwapchain->GetHudSwapchain() != XR_NULL_HANDLE) {
                 uint32_t hudImageIndex = 0;
                 if (oxrSwapchain->AcquireHudImage(hudImageIndex)) {
+                    bool hudCopied = false;
                     if (oxrSwapchain->WaitHudImage()) {
-                        oxrSwapchain->ReleaseHudImage();
-                        oxrSubmitter->SetHudQuad(oxrSwapchain->GetHudSwapchain(), currentSnapshot.width, currentSnapshot.height);
+                        VkImage hudDest = oxrSwapchain->GetHudSwapchainImageVulkan(hudImageIndex);
+                        VkImage uiSrc = static_cast<VkImage>(uiMaskHandle);
+                        auto dt = VulkanDispatchTable::Get().GetDeviceDispatch(m_device);
+                        VkQueue queue = static_cast<VkQueue>(currentSnapshot.nativeContext);
+                        if (hudDest && uiSrc && dt && queue && m_commandManager && dt->CmdCopyImage && dt->CmdPipelineBarrier && dt->QueueSubmit) {
+                            static uint32_t hudFrameIdx = MAX_FRAMES_IN_FLIGHT - 1;
+                            if (m_syncManager) {
+                                m_syncManager->WaitForFrame(hudFrameIdx);
+                                m_syncManager->ResetFrame(hudFrameIdx);
+                            }
+                            VkCommandBuffer hudCmd = m_commandManager->BeginFrame(hudFrameIdx);
+                            if (hudCmd) {
+                                VkImageMemoryBarrier barriers[2] = {};
+                                barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                                barriers[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+                                barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                                barriers[0].srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+                                barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                                barriers[0].image = uiSrc;
+                                barriers[0].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+                                barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                                barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+                                barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                                barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                                barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                                barriers[1].srcAccessMask = 0;
+                                barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                                barriers[1].image = hudDest;
+                                barriers[1].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+                                barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                                barriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+                                dt->CmdPipelineBarrier(hudCmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                                       0, 0, nullptr, 0, nullptr, 2, barriers);
+
+                                const uint32_t copyW = (oxrSwapchain->GetHudWidth() > 0 && currentSnapshot.width > 0)
+                                    ? (std::min)(oxrSwapchain->GetHudWidth(), currentSnapshot.width)
+                                    : (oxrSwapchain->GetHudWidth() > 0 ? oxrSwapchain->GetHudWidth() : currentSnapshot.width);
+                                const uint32_t copyH = (oxrSwapchain->GetHudHeight() > 0 && currentSnapshot.height > 0)
+                                    ? (std::min)(oxrSwapchain->GetHudHeight(), currentSnapshot.height)
+                                    : (oxrSwapchain->GetHudHeight() > 0 ? oxrSwapchain->GetHudHeight() : currentSnapshot.height);
+
+                                if (copyW > 0 && copyH > 0) {
+                                    VkImageCopy copyRegion{};
+                                    copyRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+                                    copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+                                    copyRegion.extent = { copyW, copyH, 1 };
+                                    dt->CmdCopyImage(hudCmd, uiSrc, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                                     hudDest, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+                                    hudCopied = true;
+                                }
+
+                                barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                                barriers[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                                barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                                barriers[0].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+
+                                barriers[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                                barriers[1].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                                barriers[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                                barriers[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+
+                                dt->CmdPipelineBarrier(hudCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                                       0, 0, nullptr, 0, nullptr, 2, barriers);
+
+                                m_commandManager->EndFrame(hudFrameIdx);
+                                VkFence fence = m_syncManager ? m_syncManager->GetFence(hudFrameIdx) : VK_NULL_HANDLE;
+                                VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+                                si.commandBufferCount = 1;
+                                si.pCommandBuffers = &hudCmd;
+                                dt->QueueSubmit(queue, 1, &si, fence);
+                                hudFrameIdx = (hudFrameIdx + 1) % MAX_FRAMES_IN_FLIGHT;
+                            }
+                        }
+                    }
+                    // Always release acquired HUD image even if WaitHudImage failed (HIGH-09)
+                    oxrSwapchain->ReleaseHudImage();
+                    if (hudCopied) {
+                        const uint32_t hudW = oxrSwapchain->GetHudWidth() > 0 ? oxrSwapchain->GetHudWidth() : currentSnapshot.width;
+                        const uint32_t hudH = oxrSwapchain->GetHudHeight() > 0 ? oxrSwapchain->GetHudHeight() : currentSnapshot.height;
+                        oxrSubmitter->SetHudQuad(oxrSwapchain->GetHudSwapchain(), hudW, hudH);
+                    } else {
+                        oxrSubmitter->ClearHudQuad();
                     }
                 }
             } else {

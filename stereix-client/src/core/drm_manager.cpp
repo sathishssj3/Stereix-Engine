@@ -64,11 +64,16 @@ bool TrialManager::ReadRegistryData() {
 
     for (DWORD i = 0; i < m_gameCount && i < MAX_GAMES; ++i) {
         char keyName[16];
-        snprintf(keyName, sizeof(keyName), "G_Name%d", i);
-        char buffer[MAX_PATH];
+        snprintf(keyName, sizeof(keyName), "G_Name%lu", static_cast<unsigned long>(i));
+        char buffer[MAX_PATH] = {};
+        DWORD valType = 0;
         DWORD bufSize = sizeof(buffer);
-        if (RegQueryValueExA(hKey, keyName, NULL, NULL, (LPBYTE)buffer, &bufSize) == ERROR_SUCCESS) {
-            m_games[i] = ObfuscateString(std::string(buffer, bufSize - 1)); // -1 to ignore null terminator during un-obfuscation
+        if (RegQueryValueExA(hKey, keyName, NULL, &valType, (LPBYTE)buffer, &bufSize) == ERROR_SUCCESS && bufSize > 0) {
+            size_t len = static_cast<size_t>(bufSize);
+            if (valType == REG_SZ && buffer[len - 1] == '\0') {
+                --len;
+            }
+            m_games[i] = ObfuscateString(std::string(buffer, len));
         }
     }
 
@@ -88,9 +93,10 @@ void TrialManager::WriteRegistryData() {
 
         for (DWORD i = 0; i < m_gameCount && i < MAX_GAMES; ++i) {
             char keyName[16];
-            snprintf(keyName, sizeof(keyName), "G_Name%d", i);
+            snprintf(keyName, sizeof(keyName), "G_Name%lu", static_cast<unsigned long>(i));
             std::string obfName = ObfuscateString(m_games[i]);
-            RegSetValueExA(hKey, keyName, 0, REG_SZ, (const BYTE*)obfName.c_str(), obfName.length() + 1);
+            // Use REG_BINARY so XOR-obfuscated zero bytes are never truncated (MED-02)
+            RegSetValueExA(hKey, keyName, 0, REG_BINARY, reinterpret_cast<const BYTE*>(obfName.data()), static_cast<DWORD>(obfName.size()));
         }
         RegCloseKey(hKey);
     }

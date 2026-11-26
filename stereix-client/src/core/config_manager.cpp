@@ -5,6 +5,7 @@
 #include <shlobj.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cmath>
 
 using json = nlohmann::json;
 
@@ -35,7 +36,8 @@ bool ConfigManager::Load(const std::string& moduleDir, const std::string& explic
         if (::GetModuleFileNameA(NULL, hostExeBuf, MAX_PATH) > 0) {
             std::string hostExeStr = hostExeBuf;
             hostExeLower = hostExeStr;
-            std::transform(hostExeLower.begin(), hostExeLower.end(), hostExeLower.begin(), ::tolower);
+            std::transform(hostExeLower.begin(), hostExeLower.end(), hostExeLower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             // Skip automated discovery from test runner binary directory in unit tests
             if (hostExeLower.find("test_") == std::string::npos) {
                 size_t lastSlash = hostExeStr.find_last_of("\\/");
@@ -87,9 +89,13 @@ bool ConfigManager::Load(const std::string& moduleDir, const std::string& explic
         json j;
         file >> j;
         
-        m_config.ipd = j.value("ipd", 0.064f);
-        m_config.convergence = j.value("convergence", 10.0f);
-        m_config.resolutionScale = j.value("resolutionScale", 1.0f);
+        auto clampFinite = [](float val, float defVal, float lo, float hi) -> float {
+            return std::isfinite(val) ? std::clamp(val, lo, hi) : defVal;
+        };
+
+        m_config.ipd = clampFinite(j.value("ipd", 0.064f), 0.064f, 0.045f, 0.085f);
+        m_config.convergence = clampFinite(j.value("convergence", 10.0f), 10.0f, 0.2f, 50.0f);
+        m_config.resolutionScale = clampFinite(j.value("resolutionScale", 1.0f), 1.0f, 0.25f, 3.0f);
         if (j.contains("enableNeuralInpainter")) {
             m_config.enableNeuralInpainter = j.value("enableNeuralInpainter", true);
         } else if (j.contains("aiInpainting")) {
@@ -99,20 +105,20 @@ bool ConfigManager::Load(const std::string& moduleDir, const std::string& explic
         }
         m_config.enableImGuiOverlay = j.value("enableImGuiOverlay", true);
         
-        m_config.motionAimSensitivity = std::clamp(
-            j.value("motionAimSensitivity", 1.0f), 0.1f, 10.0f);
+        m_config.motionAimSensitivity = clampFinite(
+            j.value("motionAimSensitivity", 1.0f), 1.0f, 0.1f, 10.0f);
             
         m_config.useRecommendedResolution = j.value("useRecommendedResolution", true);
-        m_config.srgbCorrection = j.value("srgbCorrection", false);
+        m_config.srgbCorrection = j.value("srgbCorrection", true);
 
-        m_config.contrast = std::clamp(j.value("contrast", 1.0f), 0.5f, 2.0f);
-        m_config.saturation = std::clamp(j.value("saturation", 1.0f), 0.5f, 2.0f);
-        m_config.brightness = std::clamp(j.value("brightness", 1.0f), 0.5f, 2.0f);
+        m_config.contrast = clampFinite(j.value("contrast", 1.0f), 1.0f, 0.5f, 2.0f);
+        m_config.saturation = clampFinite(j.value("saturation", 1.0f), 1.0f, 0.5f, 2.0f);
+        m_config.brightness = clampFinite(j.value("brightness", 1.0f), 1.0f, 0.5f, 2.0f);
         m_config.depthSubmission = j.value("depthSubmission", false);
         m_config.rawInputMode = j.value("rawInputMode", true);
         m_config.autoInjectOnLaunch = j.value("autoInjectOnLaunch", false);
-        m_config.vrScaleFactor = j.value("vrScaleFactor", 100.0f);
-        m_config.vrThreadPriority = j.value("vrThreadPriority", THREAD_PRIORITY_HIGHEST);
+        m_config.vrScaleFactor = clampFinite(j.value("vrScaleFactor", 100.0f), 100.0f, 0.01f, 10000.0f);
+        m_config.vrThreadPriority = std::clamp(j.value("vrThreadPriority", THREAD_PRIORITY_HIGHEST), -2, 15);
         m_config.shaderDir = j.value("shaderDir", "");
         // M-4: Reject path traversal in user-configurable directory paths
         if (m_config.shaderDir.find("..") != std::string::npos) {
@@ -124,7 +130,7 @@ bool ConfigManager::Load(const std::string& moduleDir, const std::string& explic
             LOG_WARN("ConfigManager: modelDir contains path traversal ('..'), ignoring.");
             m_config.modelDir = "";
         }
-        m_config.depthBufferMaxSizeMultiplier = j.value("depthBufferMaxSizeMultiplier", 16.0f);
+        m_config.depthBufferMaxSizeMultiplier = clampFinite(j.value("depthBufferMaxSizeMultiplier", 16.0f), 16.0f, 1.0f, 64.0f);
 
         // Per-game engine profile overrides
         m_config.engineType = j.value("engine", "");
@@ -142,23 +148,23 @@ bool ConfigManager::Load(const std::string& moduleDir, const std::string& explic
 
         // P0.2: Curved HUD
         m_config.curvedHud = j.value("curvedHud", true);
-        m_config.hudDistance = std::clamp(j.value("hudDistance", 1.8f), 0.5f, 10.0f);
-        m_config.hudCurvature = std::clamp(j.value("hudCurvature", 0.35f), 0.0f, 1.0f);
+        m_config.hudDistance = clampFinite(j.value("hudDistance", 1.8f), 1.8f, 0.5f, 10.0f);
+        m_config.hudCurvature = clampFinite(j.value("hudCurvature", 0.35f), 0.35f, 0.0f, 1.0f);
 
         // P1.1: Cutscene Auto-Theater & Virtual Cinema
         m_config.cutsceneTheater = j.value("cutsceneTheater", false);
         m_config.forceCinemaMode = j.value("forceCinemaMode", false);
-        m_config.theaterDistance = std::clamp(j.value("theaterDistance", 2.5f), 1.0f, 20.0f);
-        m_config.theaterCutThreshold = std::clamp(j.value("theaterCutThreshold", 120.0f), 30.0f, 360.0f);
+        m_config.theaterDistance = clampFinite(j.value("theaterDistance", 2.5f), 2.5f, 1.0f, 20.0f);
+        m_config.theaterCutThreshold = clampFinite(j.value("theaterCutThreshold", 120.0f), 120.0f, 30.0f, 360.0f);
 
         // P1.2: Comfort Vignette
         m_config.comfortVignette = j.value("comfortVignette", true);
-        m_config.vignetteStrength = std::clamp(j.value("vignetteStrength", 0.6f), 0.0f, 1.0f);
-        m_config.vignetteOnset = std::clamp(j.value("vignetteOnset", 45.0f), 10.0f, 180.0f);
+        m_config.vignetteStrength = clampFinite(j.value("vignetteStrength", 0.6f), 0.6f, 0.0f, 1.0f);
+        m_config.vignetteOnset = clampFinite(j.value("vignetteOnset", 45.0f), 45.0f, 10.0f, 180.0f);
 
         // P2: Horizon Lock
         m_config.horizonLock = j.value("horizonLock", false);
-        m_config.horizonLockStrength = std::clamp(j.value("horizonLockStrength", 0.85f), 0.0f, 1.0f);
+        m_config.horizonLockStrength = clampFinite(j.value("horizonLockStrength", 0.85f), 0.85f, 0.0f, 1.0f);
         
         LOG_INFO("Configuration loaded successfully from %s", m_configPath.c_str());
         return true;

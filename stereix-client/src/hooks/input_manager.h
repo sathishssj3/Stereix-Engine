@@ -16,6 +16,14 @@ public:
     bool Initialize(XrInstance instance, XrSession session);
     void Update(XrSession session);
 
+    // Drives 6DOF/3DOF game camera look from live OpenXR headset orientation deltas
+    void UpdateHeadTracking(const XrPosef& headPose, bool active);
+
+    // Pure math helpers (exposed for unit verification)
+    static void ExtractHeadAnglesDeg(const XrQuaternionf& q, float& outYawDeg, float& outPitchDeg);
+    static void ComputeHeadDeltaDeg(const XrQuaternionf& prevQ, const XrQuaternionf& currQ,
+                                    float& outDeltaYawDeg, float& outDeltaPitchDeg);
+
 private:
     XrActionSet m_actionSet = XR_NULL_HANDLE;
     
@@ -56,6 +64,10 @@ private:
 
     // P0.1: D-Pad emulation state
     bool m_leftStickClickHeld = false;
+
+    // Head-tracking orientation delta state
+    XrPosef m_prevHeadPose = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}};
+    bool m_hasPrevHeadPose = false;
 };
 
 } // namespace vrinject

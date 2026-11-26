@@ -1,5 +1,6 @@
 #include "rendering/stereo/stereo_camera_generator.h"
 #include <cmath>
+#include <algorithm>
 
 namespace vrinject {
 
@@ -17,6 +18,31 @@ static Matrix4x4 Multiply(const Matrix4x4& a, const Matrix4x4& b) {
     return result;
 }
 
+// Rotate vector v by the conjugate (inverse) of unit quaternion q
+static Vector3 RotateByConjugate(const XrQuaternionf& q, float vx, float vy, float vz) {
+    float normSq = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+    if (normSq < 1e-6f) {
+        return { vx, vy, vz };
+    }
+    float invNorm = 1.0f / std::sqrt(normSq);
+    float qx = -q.x * invNorm;
+    float qy = -q.y * invNorm;
+    float qz = -q.z * invNorm;
+    float qw =  q.w * invNorm;
+
+    // t = 2 * cross(q.xyz, v)
+    float tx = 2.0f * (qy * vz - qz * vy);
+    float ty = 2.0f * (qz * vx - qx * vz);
+    float tz = 2.0f * (qx * vy - qy * vx);
+
+    // v' = v + qw * t + cross(q.xyz, t)
+    Vector3 out;
+    out.x = vx + qw * tx + (qy * tz - qz * ty);
+    out.y = vy + qw * ty + (qz * tx - qx * tz);
+    out.z = vz + qw * tz + (qx * ty - qy * tx);
+    return out;
+}
+
 void StereoCameraGenerator::Generate(const RenderFrameSnapshot& renderSnapshot,
                                      const CameraSnapshot& camera, 
                                      const StereoConstants& constants,
@@ -24,83 +50,60 @@ void StereoCameraGenerator::Generate(const RenderFrameSnapshot& renderSnapshot,
                                      EyeView& outRightEye) {
     bool isLeftHanded = camera.isLeftHanded;
     
-    auto createPoseView = [isLeftHanded](const XrPosef& pose) -> Matrix4x4 {
-        float qx = pose.orientation.x;
-        float qy = pose.orientation.y;
-        float qz = pose.orientation.z;
-        float qw = pose.orientation.w;
-        float tx = pose.position.x;
-        float ty = pose.position.y;
-        float tz = pose.position.z;
+    auto createEyeOffsetView = [isLeftHanded](const Vector3& localEyeOffset) -> Matrix4x4 {
+        float tx = localEyeOffset.x;
+        float ty = localEyeOffset.y;
+        float tz = isLeftHanded ? -localEyeOffset.z : localEyeOffset.z;
 
-        if (isLeftHanded) {
-            tz = -tz;
-            qx = -qx;
-            qy = -qy;
-        }
-
-        float xx = qx * qx, yy = qy * qy, zz = qz * qz;
-        float xy = qx * qy, xz = qx * qz, yz = qy * qz;
-        float wx = qw * qx, wy = qw * qy, wz = qw * qz;
-
-        Matrix4x4 r;
-        r.m[0][0] = 1.0f - 2.0f * (yy + zz);
-        r.m[0][1] = 2.0f * (xy + wz);
-        r.m[0][2] = 2.0f * (xz - wy);
-        r.m[0][3] = 0.0f;
-
-        r.m[1][0] = 2.0f * (xy - wz);
-        r.m[1][1] = 1.0f - 2.0f * (xx + zz);
-        r.m[1][2] = 2.0f * (yz + wx);
-        r.m[1][3] = 0.0f;
-
-        r.m[2][0] = 2.0f * (xz + wy);
-        r.m[2][1] = 2.0f * (yz - wx);
-        r.m[2][2] = 1.0f - 2.0f * (xx + yy);
-        r.m[2][3] = 0.0f;
-
-        r.m[3][0] = 0.0f;
-        r.m[3][1] = 0.0f;
-        r.m[3][2] = 0.0f;
-        r.m[3][3] = 1.0f;
-
-        Matrix4x4 view;
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 0; j < 3; ++j) {
-                view.m[i][j] = r.m[j][i];
-            }
-            view.m[i][3] = 0.0f;
-        }
-
-        view.m[3][0] = -(view.m[0][0] * tx + view.m[1][0] * ty + view.m[2][0] * tz);
-        view.m[3][1] = -(view.m[0][1] * tx + view.m[1][1] * ty + view.m[2][1] * tz);
-        view.m[3][2] = -(view.m[0][2] * tx + view.m[1][2] * ty + view.m[2][2] * tz);
+        Matrix4x4 view = {};
+        view.m[0][0] = 1.0f;
+        view.m[1][1] = 1.0f;
+        view.m[2][2] = 1.0f;
+        view.m[3][0] = -tx;
+        view.m[3][1] = -ty;
+        view.m[3][2] = -tz;
         view.m[3][3] = 1.0f;
-
         return view;
     };
 
-    // OpenXR defines FOV relative to the center, so Left angle is negative, Right angle is positive.
-    auto createProj = [isLeftHanded](const XrFovf& fov, bool reversedZ, float zn, float zf) -> Matrix4x4 {
+    // OpenXR defines FOV relative to straight-ahead center (angleLeft < 0, angleRight > 0).
+    // Row-vector convention (clip = [x,y,z,1] * proj):
+    //   LH (+Z fwd, m[2][3] = +1): ndc.x = (x/z)*m[0][0] + m[2][0] -> m[2][0] = -(R+L)/(R-L)
+    //   RH (-Z fwd, m[2][3] = -1): ndc.x = (x/-z)*m[0][0] - m[2][0] -> m[2][0] = +(R+L)/(R-L)
+    auto createProj = [isLeftHanded](const XrFovf& fov, bool reversedZ, float zn, float zf, float outFovTan[4]) -> Matrix4x4 {
         float tanLeft = tanf(fov.angleLeft);
         float tanRight = tanf(fov.angleRight);
         float tanDown = tanf(fov.angleDown);
         float tanUp = tanf(fov.angleUp);
 
         float tanWidth = tanRight - tanLeft;
-        float tanHeight = (tanUp - tanDown);
+        float tanHeight = tanUp - tanDown;
+        if (tanWidth < 0.01f || tanHeight < 0.01f) {
+            tanLeft = -1.0f;
+            tanRight = 1.0f;
+            tanDown = -0.5625f;
+            tanUp = 0.5625f;
+            tanWidth = 2.0f;
+            tanHeight = 1.125f;
+        }
+
+        outFovTan[0] = tanLeft;
+        outFovTan[1] = tanRight;
+        outFovTan[2] = tanDown;
+        outFovTan[3] = tanUp;
         
+        float offsetSign = isLeftHanded ? -1.0f : 1.0f;
         Matrix4x4 proj = {};
         proj.m[0][0] = 2.0f / tanWidth;
         proj.m[1][1] = 2.0f / tanHeight;
-        proj.m[2][0] = (tanRight + tanLeft) / tanWidth;
-        proj.m[2][1] = (tanUp + tanDown) / tanHeight;
+        proj.m[2][0] = offsetSign * (tanRight + tanLeft) / tanWidth;
+        proj.m[2][1] = offsetSign * (tanUp + tanDown) / tanHeight;
         proj.m[2][3] = isLeftHanded ? 1.0f : -1.0f;
         
         // Z mapping (DX style)
         if (reversedZ) {
             proj.m[2][2] = isLeftHanded ? -zn / (zf - zn) : zn / (zf - zn) - 1.0f;
-            proj.m[3][2] = isLeftHanded ? (zf * zn) / (zf - zn) : (zf * zn) / (zf - zn); 
+            proj.m[3][2] = (zf * zn) / (zf - zn); 
         } else {
             proj.m[2][2] = isLeftHanded ? zf / (zf - zn) : zf / (zn - zf);
             proj.m[3][2] = isLeftHanded ? -(zf * zn) / (zf - zn) : (zf * zn) / (zn - zf);
@@ -108,15 +111,49 @@ void StereoCameraGenerator::Generate(const RenderFrameSnapshot& renderSnapshot,
         return proj;
     };
 
-    Matrix4x4 leftPoseView = createPoseView(renderSnapshot.leftPose);
-    Matrix4x4 rightPoseView = createPoseView(renderSnapshot.rightPose);
+    // Isolate ONLY the head-local inter-ocular eye offset from OpenXR STAGE/LOCAL space.
+    // On real headsets (Quest / Index / Virtual Desktop), leftPose & rightPose include
+    // standing room height (~1.65m) and arbitrary room yaw/position. Multiplying the raw
+    // STAGE pose directly into camera.view shifts the reprojection camera off the game world.
+    float midX = 0.5f * (renderSnapshot.leftPose.position.x + renderSnapshot.rightPose.position.x);
+    float midY = 0.5f * (renderSnapshot.leftPose.position.y + renderSnapshot.rightPose.position.y);
+    float midZ = 0.5f * (renderSnapshot.leftPose.position.z + renderSnapshot.rightPose.position.z);
+
+    Vector3 leftLocal = RotateByConjugate(
+        renderSnapshot.leftPose.orientation,
+        renderSnapshot.leftPose.position.x - midX,
+        renderSnapshot.leftPose.position.y - midY,
+        renderSnapshot.leftPose.position.z - midZ);
+    Vector3 rightLocal = RotateByConjugate(
+        renderSnapshot.rightPose.orientation,
+        renderSnapshot.rightPose.position.x - midX,
+        renderSnapshot.rightPose.position.y - midY,
+        renderSnapshot.rightPose.position.z - midZ);
+
+    float dx = rightLocal.x - leftLocal.x;
+    float dy = rightLocal.y - leftLocal.y;
+    float dz = rightLocal.z - leftLocal.z;
+    float measuredIpd = std::sqrt(dx * dx + dy * dy + dz * dz);
+    float targetIpd = (constants.ipd > 0.01f && constants.ipd < 0.15f) ? constants.ipd : 0.064f;
+
+    if (measuredIpd > 0.01f) {
+        float ipdScale = targetIpd / measuredIpd;
+        leftLocal.x *= ipdScale;  leftLocal.y *= ipdScale;  leftLocal.z *= ipdScale;
+        rightLocal.x *= ipdScale; rightLocal.y *= ipdScale; rightLocal.z *= ipdScale;
+    } else {
+        leftLocal = { -targetIpd * 0.5f, 0.0f, 0.0f };
+        rightLocal = { targetIpd * 0.5f, 0.0f, 0.0f };
+    }
+
+    Matrix4x4 leftPoseView = createEyeOffsetView(leftLocal);
+    Matrix4x4 rightPoseView = createEyeOffsetView(rightLocal);
 
     bool hasValidGameView = (std::abs(camera.view.m[0][0]) > 0.0001f ||
                              std::abs(camera.view.m[1][1]) > 0.0001f ||
                              std::abs(camera.view.m[2][2]) > 0.0001f ||
                              std::abs(camera.view.m[3][3]) > 0.0001f);
 
-    // Eye View = GameView * OpenXRPoseView
+    // Eye View = GameView * LocalEyeOffsetView
     if (hasValidGameView) {
         outLeftEye.view = Multiply(camera.view, leftPoseView);
         outRightEye.view = Multiply(camera.view, rightPoseView);
@@ -125,23 +162,17 @@ void StereoCameraGenerator::Generate(const RenderFrameSnapshot& renderSnapshot,
         outRightEye.view = rightPoseView;
     }
 
-    // Apply the original projection matrix scale factors to the OpenXR FOV.
-    // Actually, to use OpenXR's FOV directly, we just build a projection matrix from it.
-    // The shader might expect the same near/far planes as the game, which we don't reliably have.
-    // We will use the fallback constants for near/far if we don't have them, or approximate them.
-    // For now, we use constants.nearPlane and constants.farPlane.
     float nearP = constants.nearPlane > 0.001f ? constants.nearPlane : 0.1f;
     float farP = constants.farPlane > nearP ? constants.farPlane : 1000.0f;
 
-    outLeftEye.projection = createProj(renderSnapshot.leftFov, camera.reversedZ, nearP, farP);
-    outRightEye.projection = createProj(renderSnapshot.rightFov, camera.reversedZ, nearP, farP);
+    outLeftEye.projection = createProj(renderSnapshot.leftFov, camera.reversedZ, nearP, farP, outLeftEye.fovTan);
+    outRightEye.projection = createProj(renderSnapshot.rightFov, camera.reversedZ, nearP, farP, outRightEye.fovTan);
 
     outLeftEye.viewProjection = Multiply(outLeftEye.view, outLeftEye.projection);
     outRightEye.viewProjection = Multiply(outRightEye.view, outRightEye.projection);
 
-    // Optional eye positions (extracted from the updated view matrices)
+    // Extract world-space eye positions from updated view matrices
     auto extractPos = [](const Matrix4x4& v) -> Vector3 {
-        // Inverse translation = - v.m[3][0]*R_0 - v.m[3][1]*R_1 - v.m[3][2]*R_2
         Vector3 pos;
         pos.x = -(v.m[3][0] * v.m[0][0] + v.m[3][1] * v.m[0][1] + v.m[3][2] * v.m[0][2]);
         pos.y = -(v.m[3][0] * v.m[1][0] + v.m[3][1] * v.m[1][1] + v.m[3][2] * v.m[1][2]);

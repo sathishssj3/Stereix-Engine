@@ -23,6 +23,8 @@ jest.mock('../src/common/logger.js', () => ({
 }));
 
 import { TelemetryService } from '../src/services/telemetry/telemetry.service.js';
+import { enforceTelemetryBodyLimit, MAX_TELEMETRY_BODY_BYTES } from '../src/services/telemetry/telemetry.routes.js';
+import type { Request, Response } from 'express';
 
 describe('TelemetryService', () => {
   let telemetryService: TelemetryService;
@@ -120,6 +122,56 @@ describe('TelemetryService', () => {
       expect(summary.averageFrameRate).toBe(89.8);
       expect(summary.averageFrameTimeMs).toBe(11.13);
       expect(summary.recentCrashes).toHaveLength(1);
+    });
+  });
+
+  describe('enforceTelemetryBodyLimit (HIGH-03)', () => {
+    it('rejects >64KB pre-parsed JSON body with HTTP 413 even when global express.json ran first', () => {
+      const req = {
+        headers: {},
+        body: { padding: 'x'.repeat(MAX_TELEMETRY_BODY_BYTES + 1024) },
+      } as unknown as Request;
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+      const next = jest.fn();
+
+      enforceTelemetryBodyLimit(req, res, next);
+      expect(res.status).toHaveBeenCalledWith(413);
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('rejects oversized Content-Length header with HTTP 413', () => {
+      const req = {
+        headers: { 'content-length': String(MAX_TELEMETRY_BODY_BYTES + 1) },
+        body: {},
+      } as unknown as Request;
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+      const next = jest.fn();
+
+      enforceTelemetryBodyLimit(req, res, next);
+      expect(res.status).toHaveBeenCalledWith(413);
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('allows valid telemetry body under 64KB', () => {
+      const req = {
+        headers: { 'content-length': '256' },
+        body: { clientVersion: '0.1.122', gpuName: 'RTX 4090' },
+      } as unknown as Request;
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+      const next = jest.fn();
+
+      enforceTelemetryBodyLimit(req, res, next);
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(res.status).not.toHaveBeenCalled();
     });
   });
 });

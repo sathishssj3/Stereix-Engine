@@ -517,6 +517,12 @@ export default function App() {
   const handleInject = () => {
     if (!selectedGame) return;
 
+    // HIGH-11: Always allow aborting/closing active states before checking anti-cheat or VR headset connectivity
+    if (injectState === 'injecting' || injectState === 'running' || injectState === 'calibrating') {
+      triggerActionStep();
+      return;
+    }
+
     if (selectedGame.hasAntiCheat) {
       setModalState({
         isOpen: true,
@@ -572,7 +578,8 @@ export default function App() {
   };
 
   const triggerActionStep = () => {
-    if (injectState === 'ready') {
+    // HIGH-11: Route 'injecting' and 'running' to startInjectionSequence so ABORT SEQUENCE / CLOSE GAME reach cancel handler
+    if (injectState === 'ready' || injectState === 'injecting' || injectState === 'running') {
       startInjectionSequence();
     } else if (injectState === 'calibrating') {
       cancelAICalibration();
@@ -586,6 +593,12 @@ export default function App() {
     
     if (injectState === 'injecting' || injectState === 'running') {
        injectTokenRef.current = 0;
+       if (rafIdRef.current !== null) {
+         cancelAnimationFrame(rafIdRef.current);
+         rafIdRef.current = null;
+       }
+       logQueueRef.current = [];
+       window.ag.log.offLine();
        window.ag.inject.cancel();
        setInjectState('cancelled');
        setTimeout(() => {
@@ -693,10 +706,10 @@ export default function App() {
         cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = null;
       }
-      logQueueRef.current = [];
+      const pendingLines = logQueueRef.current.splice(0, logQueueRef.current.length);
       window.ag.log.offLine();
       setInjectState('cancelled');
-      setLogLines(prev => [...prev, `[ERROR] Injection Cancelled: ${res.message}`]);
+      setLogLines(prev => [...prev, ...pendingLines, `[ERROR] Injection Cancelled: ${res.message}`]);
       setTimeout(() => {
         setInjectState('default');
       }, 1500);
@@ -705,10 +718,10 @@ export default function App() {
         cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = null;
       }
-      logQueueRef.current = [];
+      const pendingLines = logQueueRef.current.splice(0, logQueueRef.current.length);
       window.ag.log.offLine();
       setInjectState('error');
-      setLogLines(prev => [...prev, `[ERROR] Injection Failed: ${res.message}`]);
+      setLogLines(prev => [...prev, ...pendingLines, `[ERROR] Injection Failed: ${res.message}`]);
       setTimeout(() => {
         setInjectState('default');
       }, 3000);

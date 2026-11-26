@@ -1,5 +1,5 @@
 // ============================================================================
-// main.cpp – Standalone DLL injector for Stereix Engine
+// main.cpp – Standalone hardened DLL injector for Stereix Engine
 // ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -15,6 +15,8 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 #ifndef NTSTATUS
@@ -22,13 +24,17 @@ typedef LONG NTSTATUS;
 #endif
 #include <bcrypt.h>
 #include "expected_hash.h"
-
+#include "injector_security.h"
 
 #pragma comment(lib, "Shlwapi.lib")
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "Psapi.lib")
 
 namespace {
+
+using namespace stereix::injector;
+
+FILE* g_logFile = nullptr;
 
 enum class Colour : WORD {
     Default = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE,
@@ -45,38 +51,45 @@ void SetColour(Colour c) {
 }
 
 void PrintStatus(const char* tag, Colour c, const char* fmt, ...) {
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    std::vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
     SetColour(c);
     std::printf("[%s] ", tag);
     SetColour(Colour::Default);
+    std::printf("%s\n", buf);
+    std::fflush(stdout);
 
-    va_list args;
-    va_start(args, fmt);
-    std::vprintf(fmt, args);
-    va_end(args);
-    std::printf("\n");
+    if (g_logFile) {
+        std::fprintf(g_logFile, "[%s] %s\n", tag, buf);
+        std::fflush(g_logFile);
+    }
 }
 
-void PrintOK(const char* fmt, ...)   {
+void PrintOK(const char* fmt, ...) {
     va_list a; va_start(a, fmt);
-    char buf[512]; std::vsnprintf(buf, sizeof(buf), fmt, a); va_end(a);
+    char buf[1024]; std::vsnprintf(buf, sizeof(buf), fmt, a); va_end(a);
     PrintStatus("  OK  ", Colour::Green, "%s", buf);
 }
 
 void PrintInfo(const char* fmt, ...) {
     va_list a; va_start(a, fmt);
-    char buf[512]; std::vsnprintf(buf, sizeof(buf), fmt, a); va_end(a);
+    char buf[1024]; std::vsnprintf(buf, sizeof(buf), fmt, a); va_end(a);
     PrintStatus(" INFO ", Colour::Cyan, "%s", buf);
 }
 
 void PrintWarn(const char* fmt, ...) {
     va_list a; va_start(a, fmt);
-    char buf[512]; std::vsnprintf(buf, sizeof(buf), fmt, a); va_end(a);
+    char buf[1024]; std::vsnprintf(buf, sizeof(buf), fmt, a); va_end(a);
     PrintStatus(" WARN ", Colour::Yellow, "%s", buf);
 }
 
-void PrintErr(const char* fmt, ...)  {
+void PrintErr(const char* fmt, ...) {
     va_list a; va_start(a, fmt);
-    char buf[512]; std::vsnprintf(buf, sizeof(buf), fmt, a); va_end(a);
+    char buf[1024]; std::vsnprintf(buf, sizeof(buf), fmt, a); va_end(a);
     PrintStatus(" FAIL ", Colour::Red, "%s", buf);
 }
 
@@ -101,61 +114,89 @@ std::string LastErrorMessage() {
     return result;
 }
 
-std::wstring ComputeFileHashSHA256(const std::string& filePath) {
-    BCRYPT_ALG_HANDLE hAlg = NULL;
-    BCRYPT_HASH_HANDLE hHash = NULL;
-    std::wstring hashResult = L"";
-    
-    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, NULL, 0) != 0) return L"";
+// Compute SHA-256 and validate basic MZ/PE header from an ALREADY-OPEN read-locked file handle.
+// Resets file pointer to 0 before reading.
+bool HashAndVerifyPeFromHandle(HANDLE hFile, std::wstring& outHash, bool requirePeHeader) {
+    outHash.clear();
+    if (hFile == INVALID_HANDLE_VALUE || hFile == nullptr) return false;
 
-    DWORD cbData = 0, cbHashObject = 0;
-    if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbHashObject, sizeof(DWORD), &cbData, 0) != 0) {
+    LARGE_INTEGER zero{};
+    if (!::SetFilePointerEx(hFile, zero, nullptr, FILE_BEGIN)) return false;
+
+    BCRYPT_ALG_HANDLE hAlg = nullptr;
+    BCRYPT_HASH_HANDLE hHash = nullptr;
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0) return false;
+
+    DWORD cbData = 0, cbHashObject = 0, cbHash = 0;
+    if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PBYTE>(&cbHashObject), sizeof(DWORD), &cbData, 0) != 0 ||
+        BCryptGetProperty(hAlg, BCRYPT_HASH_LENGTH, reinterpret_cast<PBYTE>(&cbHash), sizeof(DWORD), &cbData, 0) != 0) {
         BCryptCloseAlgorithmProvider(hAlg, 0);
-        return L"";
+        return false;
     }
 
     std::vector<BYTE> pbHashObject(cbHashObject);
-    DWORD cbHash = 0;
-    if (BCryptGetProperty(hAlg, BCRYPT_HASH_LENGTH, (PBYTE)&cbHash, sizeof(DWORD), &cbData, 0) != 0) {
-        BCryptCloseAlgorithmProvider(hAlg, 0);
-        return L"";
-    }
-
     std::vector<BYTE> pbHash(cbHash);
-    if (BCryptCreateHash(hAlg, &hHash, pbHashObject.data(), cbHashObject, NULL, 0, 0) != 0) {
+    if (BCryptCreateHash(hAlg, &hHash, pbHashObject.data(), cbHashObject, nullptr, 0, 0) != 0) {
         BCryptCloseAlgorithmProvider(hAlg, 0);
-        return L"";
+        return false;
     }
 
-    FILE* f = nullptr;
-    if (fopen_s(&f, filePath.c_str(), "rb") == 0 && f) {
-        BYTE buffer[8192];
-        size_t read;
-        while ((read = fread(buffer, 1, sizeof(buffer), f)) > 0) {
-            BCryptHashData(hHash, buffer, (ULONG)read, 0);
-        }
-        fclose(f);
-        
-        if (BCryptFinishHash(hHash, pbHash.data(), cbHash, 0) == 0) {
-            wchar_t hex[3];
-            for (DWORD i = 0; i < cbHash; i++) {
-                swprintf_s(hex, L"%02X", pbHash[i]);
-                hashResult += hex;
+    BYTE buffer[16384];
+    DWORD bytesRead = 0;
+    bool firstChunk = true;
+    bool peValid = !requirePeHeader;
+    bool readError = false;
+
+    while (::ReadFile(hFile, buffer, sizeof(buffer), &bytesRead, nullptr)) {
+        if (bytesRead == 0) break;
+        if (firstChunk) {
+            firstChunk = false;
+            if (requirePeHeader) {
+                peValid = false;
+                if (bytesRead >= sizeof(IMAGE_DOS_HEADER)) {
+                    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(buffer);
+                    if (dos->e_magic == IMAGE_DOS_SIGNATURE &&
+                        dos->e_lfanew >= static_cast<LONG>(sizeof(IMAGE_DOS_HEADER)) &&
+                        static_cast<DWORD>(dos->e_lfanew) + sizeof(DWORD) <= bytesRead) {
+                        const DWORD* sig = reinterpret_cast<const DWORD*>(buffer + dos->e_lfanew);
+                        if (*sig == IMAGE_NT_SIGNATURE) {
+                            peValid = true;
+                        }
+                    }
+                }
+                if (!peValid) {
+                    break;
+                }
             }
         }
+        if (BCryptHashData(hHash, buffer, bytesRead, 0) != 0) {
+            readError = true;
+            break;
+        }
+    }
+
+    bool ok = false;
+    if (!readError && peValid && BCryptFinishHash(hHash, pbHash.data(), cbHash, 0) == 0) {
+        wchar_t hex[3];
+        outHash.reserve(static_cast<size_t>(cbHash) * 2);
+        for (DWORD i = 0; i < cbHash; ++i) {
+            swprintf_s(hex, L"%02X", pbHash[i]);
+            outHash += hex;
+        }
+        ok = true;
     }
 
     BCryptDestroyHash(hHash);
     BCryptCloseAlgorithmProvider(hAlg, 0);
-    return hashResult;
+    return ok;
 }
 
-bool IsSameFile(const std::string& path1, const std::string& path2) {
-    if (_stricmp(path1.c_str(), path2.c_str()) == 0) return true;
-    HANDLE h1 = ::CreateFileA(path1.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+bool IsSameFileW(const std::wstring& path1, const std::wstring& path2) {
+    if (NormalizeWindowsPath(path1) == NormalizeWindowsPath(path2)) return true;
+    HANDLE h1 = ::CreateFileW(path1.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                               nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     if (h1 == INVALID_HANDLE_VALUE) return false;
-    HANDLE h2 = ::CreateFileA(path2.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    HANDLE h2 = ::CreateFileW(path2.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                               nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     if (h2 == INVALID_HANDLE_VALUE) {
         ::CloseHandle(h1);
@@ -173,11 +214,229 @@ bool IsSameFile(const std::string& path1, const std::string& path2) {
     return same;
 }
 
-} // namespace
+std::wstring GetParentDirW(const std::wstring& p) {
+    size_t pos = p.find_last_of(L"\\/");
+    if (pos == std::wstring::npos) return L"";
+    return p.substr(0, pos);
+}
 
-bool InjectDll(DWORD pid, const std::string& dllPath) {
+// Open an existing file exclusively against concurrent writers/deleters (FILE_SHARE_READ only),
+// rejecting symlinks/reparse points on the file and its immediate directory.
+HANDLE OpenReadLockedNonReparseFile(const std::wstring& filePath) {
+    if (filePath.empty() || HasPathTraversal(filePath) || !IsAbsoluteDrivePath(filePath)) {
+        return INVALID_HANDLE_VALUE;
+    }
+    if (IsReparsePointPath(filePath)) {
+        return INVALID_HANDLE_VALUE;
+    }
+    std::wstring parentDir = GetParentDirW(filePath);
+    if (!parentDir.empty() && IsReparsePointPath(parentDir)) {
+        return INVALID_HANDLE_VALUE;
+    }
+    HANDLE h = ::CreateFileW(
+        filePath.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ, // Prevents write/rename/delete TOCTOU while allowing LoadLibraryW
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr);
+    if (h == INVALID_HANDLE_VALUE) return INVALID_HANDLE_VALUE;
+
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!::GetFileInformationByHandle(h, &info) ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) != 0) {
+        ::CloseHandle(h);
+        return INVALID_HANDLE_VALUE;
+    }
+    return h;
+}
+
+// Resolve true final kernel path on disk (fail-closed) and block Windows system directories
+// as well as ancestor-junction escapes outside optional expectedRoot.
+bool VerifyFinalHandlePathSafe(HANDLE hFile, const std::wstring& expectedRoot = L"") {
+    if (hFile == INVALID_HANDLE_VALUE || hFile == nullptr) return false;
+    wchar_t finalBuf[1024] = {};
+    DWORD finalLen = ::GetFinalPathNameByHandleW(
+        hFile, finalBuf, static_cast<DWORD>(std::size(finalBuf)), FILE_NAME_NORMALIZED);
+    if (finalLen == 0 || finalLen >= std::size(finalBuf)) {
+        return false; // Fail-closed if kernel path cannot be resolved
+    }
+    const std::wstring finalPath(finalBuf, finalLen);
+    if (IsSystemDirectory(finalPath)) {
+        return false;
+    }
+    if (!expectedRoot.empty() && !IsPathInsideDirectory(finalPath, expectedRoot)) {
+        return false;
+    }
+    return true;
+}
+
+// Safely open a non-reparse output file handle for writing/appending, rejecting parent reparse points
+// and ancestor-junction redirects into Windows system directories.
+HANDLE OpenSafeOutputFileHandle(const std::wstring& filePath, bool appendMode, const std::wstring& expectedRoot = L"") {
+    if (filePath.empty() || HasPathTraversal(filePath) || !IsAbsoluteDrivePath(filePath)) {
+        return INVALID_HANDLE_VALUE;
+    }
+    if (IsReparsePointPath(filePath)) return INVALID_HANDLE_VALUE;
+    const std::wstring parentDir = GetParentDirW(filePath);
+    if (parentDir.empty() || IsReparsePointPath(parentDir) || IsSystemDirectory(parentDir)) {
+        return INVALID_HANDLE_VALUE;
+    }
+    HANDLE hFile = ::CreateFileW(
+        filePath.c_str(),
+        appendMode ? FILE_APPEND_DATA : GENERIC_WRITE,
+        FILE_SHARE_READ,
+        nullptr,
+        appendMode ? OPEN_ALWAYS : CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) return INVALID_HANDLE_VALUE;
+
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!::GetFileInformationByHandle(hFile, &info) ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) != 0 ||
+        !VerifyFinalHandlePathSafe(hFile, expectedRoot)) {
+        ::CloseHandle(hFile);
+        if (!appendMode) {
+            ::DeleteFileW(filePath.c_str());
+        }
+        return INVALID_HANDLE_VALUE;
+    }
+    return hFile;
+}
+
+// Copy bytes from an already-verified, read-locked source handle to a destination file safely.
+bool CopyFromVerifiedHandle(HANDLE hSrc, const std::wstring& dstPath, const std::wstring& expectedRoot = L"") {
+    if (hSrc == INVALID_HANDLE_VALUE || dstPath.empty()) return false;
+    if (IsReparsePointPath(dstPath)) return false;
+    std::wstring dstParent = GetParentDirW(dstPath);
+    if (dstParent.empty() || IsReparsePointPath(dstParent) || IsSystemDirectory(dstParent)) {
+        return false;
+    }
+
+    LARGE_INTEGER zero{};
+    if (!::SetFilePointerEx(hSrc, zero, nullptr, FILE_BEGIN)) return false;
+
+    std::wstring tmpPath = dstPath + L".stereix_tmp_" + std::to_wstring(::GetCurrentProcessId());
+    if (IsReparsePointPath(tmpPath)) return false;
+
+    HANDLE hDst = ::CreateFileW(
+        tmpPath.c_str(),
+        GENERIC_WRITE,
+        0,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr);
+    if (hDst == INVALID_HANDLE_VALUE) return false;
+
+    // Resolve the true final kernel path on disk (fail-closed) to block ancestor-junction writes
+    if (!VerifyFinalHandlePathSafe(hDst, expectedRoot)) {
+        ::CloseHandle(hDst);
+        ::DeleteFileW(tmpPath.c_str());
+        return false;
+    }
+
+    BYTE buf[32768];
+    DWORD bytesRead = 0;
+    bool ok = true;
+    while (::ReadFile(hSrc, buf, sizeof(buf), &bytesRead, nullptr)) {
+        if (bytesRead == 0) break;
+        DWORD bytesWritten = 0;
+        if (!::WriteFile(hDst, buf, bytesRead, &bytesWritten, nullptr) || bytesWritten != bytesRead) {
+            ok = false;
+            break;
+        }
+    }
+    ::CloseHandle(hDst);
+
+    if (!ok) {
+        ::DeleteFileW(tmpPath.c_str());
+        return false;
+    }
+
+    if (::GetFileAttributesW(dstPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        std::wstring dstOld = dstPath + L".old";
+        if (!IsReparsePointPath(dstOld)) {
+            ::DeleteFileW(dstOld.c_str());
+            ::MoveFileExW(dstPath.c_str(), dstOld.c_str(), MOVEFILE_REPLACE_EXISTING);
+        }
+    }
+
+    if (!::MoveFileExW(tmpPath.c_str(), dstPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        ::DeleteFileW(tmpPath.c_str());
+        return false;
+    }
+    return true;
+}
+
+bool QueryProcessImageAndMem(DWORD pid, std::wstring& outImagePath, SIZE_T& outWorkingSet) {
+    outImagePath.clear();
+    outWorkingSet = 0;
+    HANDLE hProc = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProc) {
+        hProc = ::OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+    }
+    if (!hProc) return false;
+
+    wchar_t imgBuf[1024] = {};
+    DWORD imgSize = static_cast<DWORD>(std::size(imgBuf));
+    bool hasPath = ::QueryFullProcessImageNameW(hProc, 0, imgBuf, &imgSize) != FALSE;
+    if (hasPath) {
+        outImagePath.assign(imgBuf, imgSize);
+    }
+
+    PROCESS_MEMORY_COUNTERS pmc{};
+    if (::GetProcessMemoryInfo(hProc, &pmc, sizeof(pmc))) {
+        outWorkingSet = pmc.WorkingSetSize;
+    }
+    ::CloseHandle(hProc);
+    return hasPath;
+}
+
+// Re-resolve live game PID inside the elevated injector using verified exe name + install directory.
+DWORD ResolveLiveGamePid(const std::wstring& expectedExeName, const std::wstring& expectedInstallPath) {
+    if (expectedExeName.empty()) return 0;
+    const std::wstring targetBase = ExtractBasenameLower(expectedExeName);
+
+    HANDLE hSnap = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnap == INVALID_HANDLE_VALUE) return 0;
+
+    DWORD bestPid = 0;
+    SIZE_T bestMem = 0;
+
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof(pe);
+    if (::Process32FirstW(hSnap, &pe)) {
+        do {
+            if (pe.th32ProcessID <= 4) continue;
+            if (ToLowerWide(pe.szExeFile) != targetBase) continue;
+
+            std::wstring imgPath;
+            SIZE_T ws = 0;
+            if (!QueryProcessImageAndMem(pe.th32ProcessID, imgPath, ws)) continue;
+            if (ws < 5 * 1024 * 1024) continue; // Ignore tiny stubs (< 5 MB)
+            if (!expectedInstallPath.empty() && !IsPathInsideDirectory(imgPath, expectedInstallPath)) {
+                continue;
+            }
+            if (ws > bestMem) {
+                bestMem = ws;
+                bestPid = pe.th32ProcessID;
+            }
+        } while (::Process32NextW(hSnap, &pe));
+    }
+    ::CloseHandle(hSnap);
+    return bestPid;
+}
+
+bool InjectDll(DWORD pid, const std::wstring& dllPathW) {
     PrintInfo("Opening process PID %lu ...", pid);
-    HANDLE hProcess = ::OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    // Least-privilege access mask (no PROCESS_ALL_ACCESS)
+    constexpr DWORD kInjectAccess =
+        PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
+        PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ;
+    HANDLE hProcess = ::OpenProcess(kInjectAccess, FALSE, pid);
     if (!hProcess) {
         PrintErr("OpenProcess failed: %s", LastErrorMessage().c_str());
         return false;
@@ -201,20 +460,16 @@ bool InjectDll(DWORD pid, const std::string& dllPath) {
         }
     }
 
-    // Duplicate Injection Shield:
-    // If vrinject.dll is already loaded in the target process (from a previous injection or proxy DLL bootstrap),
-    // calling CreateRemoteThread/LoadLibrary again risks Win32 Error 5 (ACCESS_DENIED) or corrupting MinHook.
-    // Detect existing module and report success cleanly.
+    // Duplicate Injection Shield (case-insensitive wide path check)
     HMODULE hExistingMods[1024];
     DWORD cbExistingNeeded = 0;
     if (::EnumProcessModules(hProcess, hExistingMods, sizeof(hExistingMods), &cbExistingNeeded)) {
         DWORD numMods = cbExistingNeeded / sizeof(HMODULE);
-        char modName[MAX_PATH];
+        wchar_t modName[MAX_PATH];
         for (DWORD m = 0; m < numMods; ++m) {
-            if (::GetModuleFileNameExA(hProcess, hExistingMods[m], modName, MAX_PATH)) {
-                std::string sMod(modName);
-                for (auto& ch : sMod) ch = static_cast<char>(::tolower(static_cast<unsigned char>(ch)));
-                if (sMod.find("vrinject.dll") != std::string::npos) {
+            if (::GetModuleFileNameExW(hProcess, hExistingMods[m], modName, MAX_PATH)) {
+                std::wstring sMod = ToLowerWide(modName);
+                if (sMod.find(L"vrinject.dll") != std::wstring::npos) {
                     PrintOK("Stereix Engine (vrinject.dll) is already loaded and active in target process (PID %lu).", pid);
                     PrintOK("Hook pipeline and OpenXR runtime active. Injection verified successfully.");
                     ::CloseHandle(hProcess);
@@ -224,8 +479,8 @@ bool InjectDll(DWORD pid, const std::string& dllPath) {
         }
     }
 
-    SIZE_T pathLen = dllPath.size() + 1;
-    void* remoteMem = ::VirtualAllocEx(hProcess, nullptr, pathLen,
+    SIZE_T pathBytes = (dllPathW.size() + 1) * sizeof(wchar_t);
+    void* remoteMem = ::VirtualAllocEx(hProcess, nullptr, pathBytes,
                                        MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!remoteMem) {
         PrintErr("VirtualAllocEx failed: %s", LastErrorMessage().c_str());
@@ -234,14 +489,14 @@ bool InjectDll(DWORD pid, const std::string& dllPath) {
     }
 
     SIZE_T written = 0;
-    if (!::WriteProcessMemory(hProcess, remoteMem, dllPath.c_str(), pathLen, &written)) {
+    if (!::WriteProcessMemory(hProcess, remoteMem, dllPathW.c_str(), pathBytes, &written) || written != pathBytes) {
         PrintErr("WriteProcessMemory failed: %s", LastErrorMessage().c_str());
         ::VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
         ::CloseHandle(hProcess);
         return false;
     }
 
-    HMODULE hKernel32 = ::GetModuleHandleA("kernel32.dll");
+    HMODULE hKernel32 = ::GetModuleHandleW(L"kernel32.dll");
     if (!hKernel32) {
         PrintErr("Could not get kernel32.dll handle");
         ::VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
@@ -249,21 +504,21 @@ bool InjectDll(DWORD pid, const std::string& dllPath) {
         return false;
     }
 
-    auto pLoadLibrary = reinterpret_cast<LPTHREAD_START_ROUTINE>(
-        ::GetProcAddress(hKernel32, "LoadLibraryA"));
-    if (!pLoadLibrary) {
-        PrintErr("Could not resolve LoadLibraryA");
+    auto pLoadLibraryW = reinterpret_cast<LPTHREAD_START_ROUTINE>(
+        ::GetProcAddress(hKernel32, "LoadLibraryW"));
+    if (!pLoadLibraryW) {
+        PrintErr("Could not resolve LoadLibraryW");
         ::VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
         ::CloseHandle(hProcess);
         return false;
     }
 
     PrintInfo("Creating remote thread ...");
-    
+
     bool success = false;
     for (int attempt = 1; attempt <= 10; ++attempt) {
         HANDLE hThread = ::CreateRemoteThread(hProcess, nullptr, 0,
-                                              pLoadLibrary, remoteMem,
+                                              pLoadLibraryW, remoteMem,
                                               0, nullptr);
         if (!hThread) {
             PrintErr("CreateRemoteThread failed: %s", LastErrorMessage().c_str());
@@ -271,7 +526,7 @@ bool InjectDll(DWORD pid, const std::string& dllPath) {
         }
 
         PrintInfo("Waiting for remote thread to complete (Attempt %d/10)...", attempt);
-        DWORD waitResult = ::WaitForSingleObject(hThread, 10000); 
+        DWORD waitResult = ::WaitForSingleObject(hThread, 20000);
 
         if (waitResult == WAIT_OBJECT_0) {
             DWORD exitCode = 0;
@@ -283,10 +538,10 @@ bool InjectDll(DWORD pid, const std::string& dllPath) {
                 DWORD cbNeeded = 0;
                 if (::EnumProcessModules(hProcess, hMods, sizeof(hMods), &cbNeeded)) {
                     DWORD numMods = cbNeeded / sizeof(HMODULE);
-                    char modName[MAX_PATH];
+                    wchar_t modName[MAX_PATH];
                     for (DWORD m = 0; m < numMods; ++m) {
-                        if (::GetModuleFileNameExA(hProcess, hMods[m], modName, MAX_PATH)) {
-                            if (strstr(modName, "vrinject.dll")) {
+                        if (::GetModuleFileNameExW(hProcess, hMods[m], modName, MAX_PATH)) {
+                            if (ToLowerWide(modName).find(L"vrinject.dll") != std::wstring::npos) {
                                 isLoaded = true;
                                 break;
                             }
@@ -302,14 +557,14 @@ bool InjectDll(DWORD pid, const std::string& dllPath) {
                 break;
             } else {
                 if (attempt < 10) {
-                    PrintWarn("LoadLibraryA returned NULL. Retrying in 500ms... (AV lock suspected)");
+                    PrintWarn("LoadLibraryW returned NULL. Retrying in 500ms... (AV lock suspected)");
                     ::Sleep(500);
                 } else {
-                    PrintErr("LoadLibraryA returned NULL in the remote process after 10 attempts.");
+                    PrintErr("LoadLibraryW returned NULL in the remote process after 10 attempts.");
                 }
             }
         } else if (waitResult == WAIT_TIMEOUT) {
-            PrintErr("Remote thread timed out (10 s). The target may be hung.");
+            PrintErr("Remote thread timed out (20 s). The target may be hung.");
             ::CloseHandle(hThread);
             // H-4: Do NOT free remoteMem here because the remote thread may still be executing.
             remoteMem = nullptr;
@@ -332,38 +587,92 @@ bool InjectDll(DWORD pid, const std::string& dllPath) {
     return success;
 }
 
-int main(int argc, char* argv[]) {
+} // namespace
+
+int wmain(int argc, wchar_t* argv[]) {
     HANDLE hOut = ::GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD mode = 0;
     if (hOut && ::GetConsoleMode(hOut, &mode)) {
         ::SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
     }
 
-    DWORD targetPid = 0;
-    std::string dllPath;
-    std::string copySrc;
-    std::string copyDst;
-    bool allowUnverifiedHotfix = false;
+    InjectorJobConfig job{};
+    std::wstring jobFilePath;
 
     for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--pid") == 0 && i + 1 < argc) {
-            targetPid = static_cast<DWORD>(std::strtoul(argv[++i], nullptr, 10));
-        } else if (std::strcmp(argv[i], "--dll") == 0 && i + 1 < argc) {
-            dllPath = argv[++i];
-        } else if (std::strcmp(argv[i], "--copy-src") == 0 && i + 1 < argc) {
-            copySrc = argv[++i];
-        } else if (std::strcmp(argv[i], "--copy-dst") == 0 && i + 1 < argc) {
-            copyDst = argv[++i];
-        } else if (std::strcmp(argv[i], "--allow-unverified-hotfix") == 0) {
-            allowUnverifiedHotfix = true;
+        if (std::wcscmp(argv[i], L"--job-file") == 0 && i + 1 < argc) {
+            jobFilePath = argv[++i];
+        } else if (std::wcscmp(argv[i], L"--pid") == 0 && i + 1 < argc) {
+            job.pid = static_cast<DWORD>(std::wcstoul(argv[++i], nullptr, 10));
+        } else if (std::wcscmp(argv[i], L"--dll") == 0 && i + 1 < argc) {
+            job.dllPath = argv[++i];
+        } else if (std::wcscmp(argv[i], L"--copy-src") == 0 && i + 1 < argc) {
+            job.copySrc = argv[++i];
+        } else if (std::wcscmp(argv[i], L"--copy-dst") == 0 && i + 1 < argc) {
+            job.copyDst = argv[++i];
+        } else if (std::wcscmp(argv[i], L"--log") == 0 && i + 1 < argc) {
+            job.logPath = argv[++i];
+        } else if (std::wcscmp(argv[i], L"--allow-unverified-hotfix") == 0) {
+            job.allowUnverifiedHotfix = true;
         }
     }
 
-    // S3.3: Origin Restriction (Authentication runs FIRST before any file or process actions - C-3)
-    const char* envToken = std::getenv("STEREIX_AUTH_TOKEN");
-    if (!envToken) envToken = std::getenv("NEXVR_AUTH_TOKEN");
-    if (!envToken || std::string(envToken).empty()) {
-        PrintErr("[ERROR] Unauthorized origin. Missing security token. Please launch via the Stereix Engine UI.");
+    // Load JSON job file if supplied (eliminates PowerShell quoting and command-line token exposure)
+    if (!jobFilePath.empty()) {
+        if (HasPathTraversal(jobFilePath) || !IsAbsoluteDrivePath(jobFilePath) || IsReparsePointPath(jobFilePath)) {
+            PrintErr("[ERROR] Invalid or untrusted --job-file path rejected.");
+            return 10;
+        }
+        HANDLE hJob = OpenReadLockedNonReparseFile(jobFilePath);
+        if (hJob == INVALID_HANDLE_VALUE) {
+            PrintErr("[ERROR] Unable to open --job-file securely.");
+            return 10;
+        }
+        LARGE_INTEGER fileSize{};
+        std::string jsonContent;
+        if (::GetFileSizeEx(hJob, &fileSize) && fileSize.QuadPart > 0 && fileSize.QuadPart <= 1024 * 1024) {
+            jsonContent.resize(static_cast<size_t>(fileSize.QuadPart));
+            DWORD readBytes = 0;
+            if (!::ReadFile(hJob, jsonContent.data(), static_cast<DWORD>(jsonContent.size()), &readBytes, nullptr) ||
+                readBytes != jsonContent.size()) {
+                jsonContent.clear();
+            }
+        }
+        ::CloseHandle(hJob);
+
+        if (jsonContent.empty()) {
+            PrintErr("[ERROR] Empty or unreadable --job-file.");
+            return 10;
+        }
+        std::string parseErr;
+        if (!ParseJobConfigJson(jsonContent, job, parseErr)) {
+            PrintErr("[ERROR] Failed to parse --job-file JSON: %s", parseErr.c_str());
+            return 10;
+        }
+    }
+
+    struct LogCloser {
+        ~LogCloser() {
+            if (g_logFile) {
+                std::fclose(g_logFile);
+                g_logFile = nullptr;
+            }
+        }
+    } logCloser;
+
+    // S3.3: Origin Restriction (Authentication & caller verification run FIRST before ANY file writes - CRIT-02)
+    if (job.authToken.empty()) {
+        wchar_t envTokBuf[512] = {};
+        DWORD tokLen = ::GetEnvironmentVariableW(L"STEREIX_AUTH_TOKEN", envTokBuf, 512);
+        if (tokLen == 0 || tokLen >= 512) {
+            tokLen = ::GetEnvironmentVariableW(L"NEXVR_AUTH_TOKEN", envTokBuf, 512);
+        }
+        if (tokLen > 0 && tokLen < 512) {
+            job.authToken = WideToUtf8(std::wstring(envTokBuf, tokLen));
+        }
+    }
+    if (!ValidateAuthToken(job.authToken)) {
+        PrintErr("[ERROR] Unauthorized origin. Missing or weak security token. Please launch via the Stereix Engine UI.");
         return 13;
     }
 
@@ -373,7 +682,8 @@ int main(int argc, char* argv[]) {
         PrintErr("[ERROR] Failed to query caller processes — aborting.");
         return 22;
     }
-    PROCESSENTRY32W pe2 = { sizeof(pe2) };
+    PROCESSENTRY32W pe2{};
+    pe2.dwSize = sizeof(pe2);
     DWORD selfPid = ::GetCurrentProcessId();
     if (::Process32FirstW(hSnap2, &pe2)) {
         do {
@@ -395,8 +705,8 @@ int main(int argc, char* argv[]) {
         PrintErr("[ERROR] Unable to inspect parent process — aborting");
         return 22;
     }
-    wchar_t parentName[MAX_PATH] = {0};
-    DWORD parentNameSize = MAX_PATH;
+    wchar_t parentName[1024] = {};
+    DWORD parentNameSize = static_cast<DWORD>(std::size(parentName));
     if (!::QueryFullProcessImageNameW(hParent, 0, parentName, &parentNameSize)) {
         ::CloseHandle(hParent);
         PrintErr("[ERROR] Unable to verify caller process identity — aborting");
@@ -404,26 +714,26 @@ int main(int argc, char* argv[]) {
     }
     ::CloseHandle(hParent);
 
-    std::wstring pname = parentName;
-    for (auto& c : pname) c = towlower(c);
-    if (pname.find(L"antigravity") == std::wstring::npos &&
-        pname.find(L"electron")    == std::wstring::npos &&
-        pname.find(L"nexvr")       == std::wstring::npos &&
-        pname.find(L"node")        == std::wstring::npos &&
-        pname.find(L"powershell")  == std::wstring::npos &&
-        pname.find(L"cmd")         == std::wstring::npos &&
-        pname.find(L"svchost")     == std::wstring::npos &&
-        pname.find(L"consent")     == std::wstring::npos) {
+    if (!IsAllowedCallerImagePath(std::wstring(parentName, parentNameSize))) {
         PrintErr("[ERROR] Unauthorized caller — aborting");
         return 22;
     }
 
+    // Open log file ONLY AFTER auth token + caller verification, with full reparse-point & final-path checks
+    if (!job.logPath.empty()) {
+        HANDLE hLogCheck = OpenSafeOutputFileHandle(job.logPath, true);
+        if (hLogCheck != INVALID_HANDLE_VALUE) {
+            ::CloseHandle(hLogCheck);
+            _wfopen_s(&g_logFile, job.logPath.c_str(), L"a, ccs=UTF-8");
+        }
+    }
+
     // S3.4: Anti-Cheat Protection Tripwire (M-5: covers BattlEye variants and active anti-cheat engines)
-    const char* strict_ac_blocklist[] = { 
-        "vgc.exe", 
-        "vgtray.exe", 
-        "easyanticheat.exe", 
-        "easyanticheat_eos.exe", 
+    const char* strict_ac_blocklist[] = {
+        "vgc.exe",
+        "vgtray.exe",
+        "easyanticheat.exe",
+        "easyanticheat_eos.exe",
         "beservice.exe",
         "beservice_x64.exe",
         "beservice.dll",
@@ -432,23 +742,28 @@ int main(int argc, char* argv[]) {
     };
     HANDLE hSnapAC = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapAC != INVALID_HANDLE_VALUE) {
-        PROCESSENTRY32 peAC{};
+        PROCESSENTRY32W peAC{};
         peAC.dwSize = sizeof(peAC);
-        if (::Process32First(hSnapAC, &peAC)) {
+        if (::Process32FirstW(hSnapAC, &peAC)) {
             do {
-                std::string pName = peAC.szExeFile;
-                for (char& c : pName) c = static_cast<char>(std::tolower(c));
+                std::string pName = ToLowerAscii(WideToUtf8(peAC.szExeFile));
                 for (const char* blocked : strict_ac_blocklist) {
                     if (pName.find(blocked) != std::string::npos) {
-                        PrintErr("[SECURITY] Active Anti-Cheat process detected (%s). Injection REFUSED to protect account from bans.", peAC.szExeFile);
+                        PrintErr("[SECURITY] Active Anti-Cheat process detected (%s). Injection REFUSED to protect account from bans.", WideToUtf8(peAC.szExeFile).c_str());
                         ::CloseHandle(hSnapAC);
                         return 15;
                     }
                 }
-            } while (::Process32Next(hSnapAC, &peAC));
+            } while (::Process32NextW(hSnapAC, &peAC));
         }
         ::CloseHandle(hSnapAC);
     }
+
+    DWORD targetPid = job.pid;
+    std::wstring dllPath = job.dllPath;
+    std::wstring copySrc = job.copySrc;
+    std::wstring copyDst = job.copyDst;
+    const bool allowUnverifiedHotfix = job.allowUnverifiedHotfix;
 
     // Validate required arguments
     if (targetPid <= 4 || dllPath.empty()) {
@@ -456,75 +771,89 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // S3.1: System Process Protection & PID Verification (L-4: fail closed)
+    // S3.1: System Process Protection, Exe/Path Verification & Post-UAC Re-Resolution
     bool pidFound = false;
+    std::wstring verifiedTargetExePath;
     for (int retry = 0; retry < 10 && !pidFound; ++retry) {
-        HANDLE hTemp = ::OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, targetPid);
-        if (hTemp) {
-            PROCESS_MEMORY_COUNTERS pmc{};
-            if (::GetProcessMemoryInfo(hTemp, &pmc, sizeof(pmc))) {
-                if (pmc.WorkingSetSize >= 1024 * 1024) {
+        std::wstring imgPath;
+        SIZE_T ws = 0;
+        if (QueryProcessImageAndMem(targetPid, imgPath, ws) && ws >= 1024 * 1024) {
+            bool matchesExpected = true;
+            if (!job.expectedExeName.empty() &&
+                ExtractBasenameLower(imgPath) != ExtractBasenameLower(job.expectedExeName)) {
+                matchesExpected = false;
+            }
+            if (!job.expectedInstallPath.empty() &&
+                !IsPathInsideDirectory(imgPath, job.expectedInstallPath)) {
+                matchesExpected = false;
+            }
+            if (matchesExpected) {
+                pidFound = true;
+                verifiedTargetExePath = imgPath;
+                break;
+            }
+        }
+        // If target PID exited during UAC prompt, re-resolve strictly within expectedInstallPath
+        if (!job.expectedExeName.empty() && !job.expectedInstallPath.empty()) {
+            DWORD reresolved = ResolveLiveGamePid(job.expectedExeName, job.expectedInstallPath);
+            if (reresolved > 4 && reresolved != targetPid) {
+                std::wstring newImg;
+                SIZE_T newWs = 0;
+                if (QueryProcessImageAndMem(reresolved, newImg, newWs) && newWs >= 1024 * 1024) {
+                    targetPid = reresolved;
+                    verifiedTargetExePath = newImg;
                     pidFound = true;
+                    PrintInfo("[Injector] Re-resolved live game PID after UAC: %lu", targetPid);
+                    break;
                 }
             }
-            ::CloseHandle(hTemp);
         }
         if (!pidFound) {
             ::Sleep(200);
         }
     }
-    
+
     if (!pidFound) {
-        PrintErr("[ERROR] Real Game Process (PID %lu) not found, exited, or insufficient working set.", targetPid);
+        PrintErr("[ERROR] Real Game Process (PID %lu) not found, exited, path mismatch, or insufficient working set.", targetPid);
         return 21;
     }
 
-    // S1.2: Path Traversal Check
-    if (dllPath.find("..") != std::string::npos ||
-        (!copySrc.empty() && copySrc.find("..") != std::string::npos) ||
-        (!copyDst.empty() && copyDst.find("..") != std::string::npos)) {
+    // S1.2: Path Traversal, Absolute Path & Reparse Point Checks
+    if (HasPathTraversal(dllPath) ||
+        (!copySrc.empty() && HasPathTraversal(copySrc)) ||
+        (!copyDst.empty() && HasPathTraversal(copyDst))) {
         PrintErr("[ERROR] Path traversal rejected");
         return 10;
     }
 
-    char fullPath[MAX_PATH];
-    if (::GetFullPathNameA(dllPath.c_str(), MAX_PATH, fullPath, nullptr) == 0 || dllPath != fullPath) {
-        if (::PathIsRelativeA(dllPath.c_str())) {
-            PrintErr("[ERROR] Relative DLL paths are blocked for security");
-            return 11;
-        }
+    if (!IsAbsoluteDrivePath(dllPath)) {
+        PrintErr("[ERROR] Relative DLL paths are blocked for security");
+        return 11;
+    }
+    if (IsReparsePointPath(dllPath) || IsReparsePointPath(GetParentDirW(dllPath))) {
+        PrintErr("[SECURITY ERROR] Reparse point / junction rejected for DLL path.");
+        return 10;
     }
 
-    // S1.3: Source PE Validation Check (fail closed)
-    DWORD attrs = ::GetFileAttributesA(dllPath.c_str());
-    if (attrs == INVALID_FILE_ATTRIBUTES) {
-        PrintErr("DLL not found at: %s", dllPath.c_str());
-        return 12;
-    }
-    
-    FILE* f = nullptr;
-    if (fopen_s(&f, dllPath.c_str(), "rb") != 0 || !f) {
-        PrintErr("[ERROR] Failed to open DLL for PE header verification: %s", dllPath.c_str());
-        return 12;
-    }
-    char mz[2] = {0};
-    size_t bytesRead = fread(mz, 1, 2, f);
-    fclose(f);
-    if (bytesRead != 2 || mz[0] != 'M' || mz[1] != 'Z') {
-        PrintErr("[ERROR] Invalid PE header in DLL");
+    // S1.3 & S1.4: Open DLL with FILE_SHARE_READ lock, verify PE + SHA-256 directly from handle
+    HANDLE hSourceDll = OpenReadLockedNonReparseFile(dllPath);
+    if (hSourceDll == INVALID_HANDLE_VALUE) {
+        PrintErr("[ERROR] Failed to open DLL securely (missing, locked, or reparse point): %s", WideToUtf8(dllPath).c_str());
         return 12;
     }
 
-    // S1.4: DLL Hash Verification (C-1: fail closed unless explicit operator override is granted)
-    std::wstring computedHash = ComputeFileHashSHA256(dllPath);
-    if (computedHash.empty()) {
-        PrintErr("[ERROR] Failed to compute SHA-256 hash of DLL: %s", dllPath.c_str());
-        return 14;
+    std::wstring computedHash;
+    if (!HashAndVerifyPeFromHandle(hSourceDll, computedHash, true) || computedHash.empty()) {
+        ::CloseHandle(hSourceDll);
+        PrintErr("[ERROR] Invalid PE header or failed SHA-256 computation for DLL: %s", WideToUtf8(dllPath).c_str());
+        return 12;
     }
+
     if (computedHash != EXPECTED_DLL_HASH) {
         if (allowUnverifiedHotfix) {
             PrintWarn("[SECURITY WARNING] DLL hash differs from build baseline, but --allow-unverified-hotfix was explicitly granted.");
         } else {
+            ::CloseHandle(hSourceDll);
             PrintErr("[SECURITY ERROR] DLL hash verification failed!");
             PrintErr("  Expected: %ls", EXPECTED_DLL_HASH);
             PrintErr("  Computed: %ls", computedHash.c_str());
@@ -536,126 +865,125 @@ int main(int argc, char* argv[]) {
     }
 
     // Auto-resolve copy paths if omitted
-    char selfExePath[MAX_PATH] = {0};
-    ::GetModuleFileNameA(NULL, selfExePath, MAX_PATH);
-    std::string selfDir = selfExePath;
-    size_t lastSlash = selfDir.find_last_of("\\/");
-    if (lastSlash != std::string::npos) {
-        selfDir = selfDir.substr(0, lastSlash);
-    }
+    wchar_t selfExePath[1024] = {};
+    ::GetModuleFileNameW(nullptr, selfExePath, static_cast<DWORD>(std::size(selfExePath)));
+    std::wstring selfDir = GetParentDirW(selfExePath);
 
     if (copySrc.empty()) {
         copySrc = selfDir;
     }
 
-    if (copyDst.empty() && targetPid > 4) {
-        HANDLE hTargetProc = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, targetPid);
-        if (hTargetProc) {
-            char targetExeBuf[MAX_PATH] = {0};
-            DWORD bufSize = MAX_PATH;
-            if (::QueryFullProcessImageNameA(hTargetProc, 0, targetExeBuf, &bufSize)) {
-                std::string targetExeStr = targetExeBuf;
-                size_t slashPos = targetExeStr.find_last_of("\\/");
-                if (slashPos != std::string::npos) {
-                    copyDst = targetExeStr.substr(0, slashPos);
-                }
-            }
-            ::CloseHandle(hTargetProc);
+    std::wstring targetExeDir = GetParentDirW(verifiedTargetExePath);
+    if (copyDst.empty() && !targetExeDir.empty()) {
+        copyDst = targetExeDir;
+    }
+
+    // Validate copyDst strictly before privileged file copy
+    if (!copyDst.empty()) {
+        if (IsSystemDirectory(copyDst) || IsReparsePointPath(copyDst)) {
+            ::CloseHandle(hSourceDll);
+            PrintErr("[SECURITY ERROR] Refusing to deploy dependencies into system directory or reparse point.");
+            return 10;
+        }
+        if (!job.expectedInstallPath.empty() && !IsPathInsideDirectory(copyDst, job.expectedInstallPath)) {
+            ::CloseHandle(hSourceDll);
+            PrintErr("[SECURITY ERROR] Refusing to deploy dependencies outside verified game install directory.");
+            return 10;
+        }
+        if (job.expectedInstallPath.empty() && !targetExeDir.empty() && !IsPathInsideDirectory(copyDst, targetExeDir) &&
+            !IsSameFileW(copyDst, selfDir)) {
+            ::CloseHandle(hSourceDll);
+            PrintErr("[SECURITY ERROR] Refusing to deploy dependencies to unrelated destination directory.");
+            return 10;
         }
     }
 
-    // Copy dependencies to game directory using elevated permissions (only runs AFTER auth & origin checks succeed)
+    // Copy dependencies to game directory using elevated permissions (ONLY verified binaries!)
     if (!copySrc.empty() && !copyDst.empty()) {
-        PrintInfo("Synchronizing engine dependencies from %s to %s", copySrc.c_str(), copyDst.c_str());
+        PrintInfo("Synchronizing engine dependencies from %s to %s", WideToUtf8(copySrc).c_str(), WideToUtf8(copyDst).c_str());
 
-        // Parse semicolon- or comma-separated source directories
-        std::vector<std::string> srcDirs;
+        std::vector<std::wstring> srcDirs;
         size_t start = 0;
         while (start < copySrc.size()) {
-            size_t delim = copySrc.find_first_of(";,\n\r", start);
-            std::string dir = (delim == std::string::npos) ? copySrc.substr(start) : copySrc.substr(start, delim - start);
-            while (!dir.empty() && (dir.front() == ' ' || dir.front() == '"' || dir.front() == '\'')) dir.erase(dir.begin());
-            while (!dir.empty() && (dir.back() == ' ' || dir.back() == '"' || dir.back() == '\'')) dir.pop_back();
-            if (!dir.empty() && ::GetFileAttributesA(dir.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            size_t delim = copySrc.find_first_of(L";,\n\r", start);
+            std::wstring dir = (delim == std::wstring::npos) ? copySrc.substr(start) : copySrc.substr(start, delim - start);
+            while (!dir.empty() && (dir.front() == L' ' || dir.front() == L'"' || dir.front() == L'\'')) dir.erase(dir.begin());
+            while (!dir.empty() && (dir.back() == L' ' || dir.back() == L'"' || dir.back() == L'\'')) dir.pop_back();
+            if (!dir.empty() && IsAbsoluteDrivePath(dir) && !HasPathTraversal(dir) && !IsReparsePointPath(dir) &&
+                ::GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) {
                 srcDirs.push_back(dir);
             }
-            if (delim == std::string::npos) break;
+            if (delim == std::wstring::npos) break;
             start = delim + 1;
         }
-        if (srcDirs.empty()) {
+        if (srcDirs.empty() && !selfDir.empty() && !IsReparsePointPath(selfDir)) {
             srcDirs.push_back(selfDir);
         }
 
-        // 1. Deploy vrinject.dll: prioritize the explicit dllPath requested by launcher
-        std::string targetDllDst = copyDst + "\\vrinject.dll";
-        std::string dllSourceToDeploy = "";
-        if (!dllPath.empty() && ::GetFileAttributesA(dllPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
-            char fullDllPath[MAX_PATH] = {0};
-            char fullDstPath[MAX_PATH] = {0};
-            ::GetFullPathNameA(dllPath.c_str(), MAX_PATH, fullDllPath, nullptr);
-            ::GetFullPathNameA(targetDllDst.c_str(), MAX_PATH, fullDstPath, nullptr);
-            if (!IsSameFile(fullDllPath, targetDllDst)) {
-                dllSourceToDeploy = dllPath;
-            }
-        }
-        if (dllSourceToDeploy.empty()) {
-            for (const auto& d : srcDirs) {
-                std::string cand = d + "\\vrinject.dll";
-                if (::GetFileAttributesA(cand.c_str()) != INVALID_FILE_ATTRIBUTES) {
-                    char fullCandPath[MAX_PATH] = {0};
-                    char fullDstPath[MAX_PATH] = {0};
-                    ::GetFullPathNameA(cand.c_str(), MAX_PATH, fullCandPath, nullptr);
-                    ::GetFullPathNameA(targetDllDst.c_str(), MAX_PATH, fullDstPath, nullptr);
-                    if (!IsSameFile(fullCandPath, targetDllDst)) {
-                        dllSourceToDeploy = cand;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!dllSourceToDeploy.empty()) {
-            if (::GetFileAttributesA(targetDllDst.c_str()) != INVALID_FILE_ATTRIBUTES) {
-                std::string dstOld = targetDllDst + ".old";
-                ::DeleteFileA(dstOld.c_str());
-                ::MoveFileA(targetDllDst.c_str(), dstOld.c_str());
-            }
-            if (::CopyFileA(dllSourceToDeploy.c_str(), targetDllDst.c_str(), FALSE)) {
-                PrintOK("Deployed vrinject.dll to target directory from %s", dllSourceToDeploy.c_str());
+        // 1. Deploy vrinject.dll directly from the ALREADY-VERIFIED hSourceDll handle (zero TOCTOU)
+        const std::wstring verifiedRoot = !job.expectedInstallPath.empty() ? job.expectedInstallPath : copyDst;
+        std::wstring targetDllDst = copyDst + L"\\vrinject.dll";
+        if (!IsSameFileW(dllPath, targetDllDst)) {
+            if (CopyFromVerifiedHandle(hSourceDll, targetDllDst, verifiedRoot)) {
+                PrintOK("Deployed vrinject.dll to target directory from verified handle.");
                 dllPath = targetDllDst;
             } else {
-                PrintWarn("Could not deploy vrinject.dll to target directory (Error: %lu). Retaining source DLL path.", ::GetLastError());
+                PrintWarn("Could not deploy vrinject.dll to target directory (Error: %lu). Retaining verified source DLL path.", ::GetLastError());
             }
         }
 
-        // 2. Synchronize support runtime DLLs (onnxruntime.dll, DirectML.dll)
-        const char* supportDlls[] = {"onnxruntime.dll", "DirectML.dll"};
-        for (const char* sf : supportDlls) {
-            std::string dst = copyDst + "\\" + sf;
+        // 2. Synchronize support runtime DLLs (onnxruntime.dll, DirectML.dll) ONLY after SHA-256 verification!
+        struct SupportDllSpec {
+            const wchar_t* name;
+            const wchar_t* expectedHash;
+        };
+        const SupportDllSpec supportDlls[] = {
+            { L"onnxruntime.dll", EXPECTED_ONNXRUNTIME_HASH },
+            { L"DirectML.dll",    EXPECTED_DIRECTML_HASH },
+        };
+        for (const auto& spec : supportDlls) {
+            std::wstring dst = copyDst + L"\\" + spec.name;
             for (const auto& d : srcDirs) {
-                std::string src = d + "\\" + sf;
-                if (::GetFileAttributesA(src.c_str()) != INVALID_FILE_ATTRIBUTES && !IsSameFile(src, dst)) {
-                    if (::GetFileAttributesA(dst.c_str()) != INVALID_FILE_ATTRIBUTES) {
-                        std::string dstOld = dst + ".old";
-                        ::DeleteFileA(dstOld.c_str());
-                        ::MoveFileA(dst.c_str(), dstOld.c_str());
-                    }
-                    if (::CopyFileA(src.c_str(), dst.c_str(), FALSE)) {
-                        PrintOK("Deployed %s to target directory.", sf);
-                    }
-                    break;
+                std::wstring src = d + L"\\" + spec.name;
+                if (::GetFileAttributesW(src.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
+                if (IsSameFileW(src, dst)) break;
+
+                HANDLE hSupport = OpenReadLockedNonReparseFile(src);
+                if (hSupport == INVALID_HANDLE_VALUE) {
+                    PrintWarn("[SECURITY] Skipping untrusted or reparse-point support DLL: %s", WideToUtf8(src).c_str());
+                    continue;
                 }
+                std::wstring supHash;
+                bool peOk = HashAndVerifyPeFromHandle(hSupport, supHash, true);
+                bool hashMatches = peOk && !supHash.empty() &&
+                                   (spec.expectedHash[0] != L'\0') &&
+                                   (supHash == spec.expectedHash);
+                if (!hashMatches) {
+                    ::CloseHandle(hSupport);
+                    PrintErr("[SECURITY ERROR] Support DLL %ls failed SHA-256 verification from %s — refusing privileged copy!",
+                             spec.name, WideToUtf8(src).c_str());
+                    continue;
+                }
+                if (CopyFromVerifiedHandle(hSupport, dst, verifiedRoot)) {
+                    PrintOK("Verified and deployed %ls to target directory.", spec.name);
+                }
+                ::CloseHandle(hSupport);
+                break;
             }
         }
 
         // 3. Synchronize vrinject.json ONLY if destination does not already exist
-        std::string jsonDst = copyDst + "\\vrinject.json";
-        if (::GetFileAttributesA(jsonDst.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        std::wstring jsonDst = copyDst + L"\\vrinject.json";
+        if (::GetFileAttributesW(jsonDst.c_str()) == INVALID_FILE_ATTRIBUTES && !IsReparsePointPath(jsonDst)) {
             for (const auto& d : srcDirs) {
-                std::string jsonSrc = d + "\\vrinject.json";
-                if (::GetFileAttributesA(jsonSrc.c_str()) != INVALID_FILE_ATTRIBUTES && !IsSameFile(jsonSrc, jsonDst)) {
-                    if (::CopyFileA(jsonSrc.c_str(), jsonDst.c_str(), FALSE)) {
-                        PrintOK("Deployed initial vrinject.json to target directory.");
+                std::wstring jsonSrc = d + L"\\vrinject.json";
+                if (::GetFileAttributesW(jsonSrc.c_str()) != INVALID_FILE_ATTRIBUTES && !IsSameFileW(jsonSrc, jsonDst)) {
+                    HANDLE hJson = OpenReadLockedNonReparseFile(jsonSrc);
+                    if (hJson != INVALID_HANDLE_VALUE) {
+                        if (CopyFromVerifiedHandle(hJson, jsonDst, verifiedRoot)) {
+                            PrintOK("Deployed initial vrinject.json to target directory.");
+                        }
+                        ::CloseHandle(hJson);
                     }
                     break;
                 }
@@ -665,33 +993,55 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Re-verify deployed DLL integrity before injection to prevent TOCTOU
-    {
-        FILE* verifyF = nullptr;
-        if (fopen_s(&verifyF, dllPath.c_str(), "rb") != 0 || !verifyF) {
-            PrintErr("[ERROR] Unable to open target DLL for final pre-injection check: %s", dllPath.c_str());
+    // Hold a FILE_SHARE_READ lock on the final DLL path ACROSS InjectDll to eliminate TOCTOU!
+    HANDLE hFinalDllLock = hSourceDll;
+    if (!IsSameFileW(dllPath, job.dllPath)) {
+        ::CloseHandle(hSourceDll);
+        hSourceDll = INVALID_HANDLE_VALUE;
+
+        hFinalDllLock = OpenReadLockedNonReparseFile(dllPath);
+        if (hFinalDllLock == INVALID_HANDLE_VALUE) {
+            PrintErr("[ERROR] Unable to lock target DLL for final pre-injection verification: %s", WideToUtf8(dllPath).c_str());
             return 12;
         }
-        char mz[2] = {0};
-        size_t n = fread(mz, 1, 2, verifyF);
-        fclose(verifyF);
-        if (n != 2 || mz[0] != 'M' || mz[1] != 'Z') {
+        std::wstring finalHash;
+        if (!HashAndVerifyPeFromHandle(hFinalDllLock, finalHash, true) || finalHash.empty()) {
+            ::CloseHandle(hFinalDllLock);
             PrintErr("[ERROR] Target DLL image corrupted before injection");
             return 12;
         }
-
-        std::wstring finalHash = ComputeFileHashSHA256(dllPath);
-        if (finalHash != EXPECTED_DLL_HASH && !allowUnverifiedHotfix) {
+        // Always require deployed bytes to match the originally verified source hash (even with --allow-unverified-hotfix)
+        if (finalHash != computedHash || (finalHash != EXPECTED_DLL_HASH && !allowUnverifiedHotfix)) {
+            ::CloseHandle(hFinalDllLock);
             PrintErr("[SECURITY ERROR] Final DLL hash check failed immediately before injection!");
             return 14;
         }
     }
 
     PrintInfo("Target PID:  %lu", targetPid);
-    PrintInfo("DLL path:    %s", dllPath.c_str());
+    PrintInfo("DLL path:    %s", WideToUtf8(dllPath).c_str());
     std::printf("\n");
 
+    // hFinalDllLock remains open with FILE_SHARE_READ only throughout LoadLibraryW retries!
     bool ok = InjectDll(targetPid, dllPath);
+
+    if (hFinalDllLock != INVALID_HANDLE_VALUE) {
+        ::CloseHandle(hFinalDllLock);
+    }
+
+    // Persist resolved PID back to launcher so activeTargetPid/monitor/cancel stay in sync
+    if (ok && !job.resultFile.empty()) {
+        HANDLE hRes = OpenSafeOutputFileHandle(job.resultFile, false);
+        if (hRes != INVALID_HANDLE_VALUE) {
+            char payload[64] = {};
+            int len = std::snprintf(payload, sizeof(payload), "{\"resolvedPid\":%lu}\n", targetPid);
+            if (len > 0) {
+                DWORD written = 0;
+                ::WriteFile(hRes, payload, static_cast<DWORD>(len), &written, nullptr);
+            }
+            ::CloseHandle(hRes);
+        }
+    }
 
     std::printf("\n");
     if (ok) {

@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 
 jest.mock('../src/common/config.js', () => ({
@@ -40,8 +41,9 @@ jest.mock('../src/common/logger.js', () => ({
   },
 }));
 
-import { AuthService } from '../src/services/auth/auth.service.js';
-import { requireAdmin, requireRole } from '../src/services/auth/auth.middleware.js';
+import { AuthService, hashRefreshToken } from '../src/services/auth/auth.service.js';
+import { authenticate, requireAdmin, requireRole } from '../src/services/auth/auth.middleware.js';
+import { UserService } from '../src/services/user/user.service.js';
 import { ConflictError, UnauthorizedError, ForbiddenError } from '../src/common/errors.js';
 import type { Request, Response, NextFunction } from 'express';
 
@@ -148,17 +150,85 @@ describe('AuthService', () => {
       mockDb.refreshToken.create.mockResolvedValue({ id: 'tok_new' });
 
       const res = await authService.refreshToken('valid_refresh_token');
+      const expectedHash = hashRefreshToken('valid_refresh_token');
 
       expect(mockDb.refreshToken.updateMany).toHaveBeenCalledWith({
         where: {
-          token: 'valid_refresh_token',
+          token: expectedHash,
           revoked: false,
           expiresAt: expect.any(Object),
         },
         data: { revoked: true },
       });
+      // HIGH-02: Newly persisted refresh token must be SHA-256 hashed, never plaintext
+      expect(mockDb.refreshToken.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            token: hashRefreshToken(res.refreshToken),
+          }),
+        })
+      );
       expect(res.accessToken).toBeDefined();
       expect(res.refreshToken).toBeDefined();
+    });
+
+    it('rejects refresh JWT stripped of prefix when presented as an access token (HIGH-02)', async () => {
+      mockDb.user.findFirst.mockResolvedValue(null);
+      mockDb.user.create.mockResolvedValue({
+        id: 'usr_sep',
+        username: 'sep',
+        email: 'sep@example.test',
+        role: 'USER',
+        tier: 'FREE',
+        createdAt: new Date(),
+      });
+      mockDb.refreshToken.create.mockResolvedValue({ id: 'tok_sep' });
+
+      const { refreshToken } = await authService.register('sep', 'sep@example.test', 'StrongPass123!');
+      const strippedJwt = refreshToken.slice(refreshToken.indexOf('.') + 1);
+      const req = { headers: { authorization: `Bearer ${strippedJwt}` } } as unknown as Request;
+      const res = { status: jest.fn().mockReturnThis(), json: jest.fn() } as unknown as Response;
+      const next = jest.fn();
+
+      expect(() => authenticate(req, res, next)).toThrow(UnauthorizedError);
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('generates distinct refresh tokens on same-millisecond calls (jti uniqueness, HIGH-02)', async () => {
+      mockDb.refreshToken.create.mockResolvedValue({ id: 'tok_uniq' });
+      const passwordHash = await bcrypt.hash('SameMsPass', 10);
+      mockDb.user.findFirst.mockResolvedValue({
+        id: 'usr_ms',
+        username: 'ms',
+        email: 'ms@example.test',
+        passwordHash,
+        role: 'USER',
+        tier: 'FREE',
+      });
+
+      const [r1, r2] = await Promise.all([
+        authService.login('ms@example.test', 'SameMsPass'),
+        authService.login('ms@example.test', 'SameMsPass'),
+      ]);
+      expect(r1.refreshToken).not.toBe(r2.refreshToken);
+      expect(crypto.createHash('sha256').update(r1.refreshToken).digest('hex')).not.toBe(
+        crypto.createHash('sha256').update(r2.refreshToken).digest('hex')
+      );
+    });
+
+    it('revokes all active refresh tokens when changing password (HIGH-02)', async () => {
+      const userService = new UserService();
+      const oldHash = await bcrypt.hash('OldPass123!', 10);
+      mockDb.user.findUnique.mockResolvedValue({ id: 'usr_pw', passwordHash: oldHash });
+      mockDb.user.update.mockResolvedValue({ id: 'usr_pw' });
+      mockDb.refreshToken.updateMany.mockResolvedValue({ count: 2 });
+
+      await userService.changePassword('usr_pw', 'OldPass123!', 'NewPass456!');
+
+      expect(mockDb.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'usr_pw', revoked: false },
+        data: { revoked: true },
+      });
     });
 
     it('rejects refresh token when token is already revoked or expired (race mitigation)', async () => {

@@ -40,6 +40,7 @@ struct RenderFrameSnapshot {
     void* nativePhysicalDevice = nullptr; // VkPhysicalDevice (Vulkan only)
     void* nativeSwapchain = nullptr;    // IDXGISwapChain* or VkSwapchainKHR
     void* nativeSurface = nullptr;      // VkSurfaceKHR (Vulkan only)
+    void* nativeHwnd = nullptr;         // HWND populated safely by each backend lifecycle manager (CRIT-04)
     
     // Swapchain metadata
     void* backBuffer = nullptr;         // ID3D11Texture2D*, ID3D12Resource*, or VkImage

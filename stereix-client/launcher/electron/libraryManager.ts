@@ -39,6 +39,7 @@ function inspectExeAPI(exePath: string): 'DX11' | 'DX12' | 'Vulkan' | 'Unknown' 
     } catch {}
 
     // Read up to 256MB in 8MB chunks to search PE import directory and code sections
+    // MED-05: Always close fd in finally so errors cannot leak file descriptors
     const fd = fs.openSync(exePath, 'r');
     const chunkSize = 8 * 1024 * 1024;
     const maxScanBytes = Math.min(stat.size, 256 * 1024 * 1024);
@@ -48,24 +49,27 @@ function inspectExeAPI(exePath: string): 'DX11' | 'DX12' | 'Vulkan' | 'Unknown' 
     let hasVulkan = false;
     let hasD3D11 = false;
 
-    for (let offset = 0; offset < maxScanBytes; offset += chunkSize) {
-      const bytesToRead = Math.min(chunkSize, maxScanBytes - offset);
-      const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead, offset);
-      if (bytesRead <= 0) break;
-      const str = buffer.subarray(0, bytesRead).toString('latin1').toLowerCase();
+    try {
+      for (let offset = 0; offset < maxScanBytes; offset += chunkSize) {
+        const bytesToRead = Math.min(chunkSize, maxScanBytes - offset);
+        const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead, offset);
+        if (bytesRead <= 0) break;
+        const str = buffer.subarray(0, bytesRead).toString('latin1').toLowerCase();
 
-      if (str.includes('d3d12.dll') || str.includes('d3d12core.dll')) {
-        hasD3D12 = true;
-        break; // DX12 confirmed
+        if (str.includes('d3d12.dll') || str.includes('d3d12core.dll')) {
+          hasD3D12 = true;
+          break; // DX12 confirmed
+        }
+        if (str.includes('vulkan-1.dll')) {
+          hasVulkan = true;
+        }
+        if (str.includes('d3d11.dll')) {
+          hasD3D11 = true;
+        }
       }
-      if (str.includes('vulkan-1.dll')) {
-        hasVulkan = true;
-      }
-      if (str.includes('d3d11.dll')) {
-        hasD3D11 = true;
-      }
+    } finally {
+      fs.closeSync(fd);
     }
-    fs.closeSync(fd);
 
     if (hasD3D12) return 'DX12';
     if (hasVulkan) return 'Vulkan';
@@ -309,12 +313,30 @@ export function invalidateScanCache(): void {
   scanCache = null;
 }
 
+function hydrateGameMapsFromEntries(entries: GameEntry[]): void {
+  for (const g of entries) {
+    if (!g || typeof g !== 'object') continue;
+    try {
+      const id = validateGameId(g.id);
+      if (typeof g.installPath === 'string' && g.installPath.length > 0 && fs.existsSync(g.installPath)) {
+        gamePathsMap[id] = g.installPath;
+      }
+      if (typeof g.executablePath === 'string' && g.executablePath.length > 0 && fs.existsSync(g.executablePath)) {
+        gameExeMap[id] = g.executablePath;
+      }
+    } catch {
+      // Ignore malformed cached entries
+    }
+  }
+}
+
 // Fast path: return cached data for initial render (sub-5ms)
 ipcMain.handle('library:scanCached', async (event): Promise<{ active: GameEntry[], waiting: GameEntry[], fromCache: boolean }> => {
   assertTrustedIpcSender(event);
   
   // Return in-memory cache if fresh
   if (scanCache && (Date.now() - scanCache.timestamp) < SCAN_CACHE_TTL_MS) {
+    hydrateGameMapsFromEntries([...scanCache.active, ...scanCache.waiting]);
     return { active: scanCache.active, waiting: scanCache.waiting, fromCache: true };
   }
   
@@ -322,6 +344,7 @@ ipcMain.handle('library:scanCached', async (event): Promise<{ active: GameEntry[
   const diskCache = loadDiskCache();
   if (diskCache && (Date.now() - diskCache.timestamp) < 120_000) { // 2 min for disk cache
     scanCache = diskCache;
+    hydrateGameMapsFromEntries([...diskCache.active, ...diskCache.waiting]);
     return { active: diskCache.active, waiting: diskCache.waiting, fromCache: true };
   }
   
@@ -877,6 +900,7 @@ ipcMain.handle('library:addCustom', async (event): Promise<{ success: boolean }>
   };
   
   try {
+    gamePathsMap[id] = installPath;
     gameExeMap[id] = exePath;
     const customGamesFile = path.join(app.getPath('userData'), 'custom_games.json');
     let existing: GameEntry[] = [];
@@ -886,6 +910,7 @@ ipcMain.handle('library:addCustom', async (event): Promise<{ success: boolean }>
     }
     existing.push(newGame);
     fs.writeFileSync(customGamesFile, JSON.stringify(existing, null, 2));
+    invalidateScanCache();
     return { success: true };
   } catch(e) {
     return { success: false };
@@ -913,6 +938,7 @@ ipcMain.handle('library:removeGame', async (event, id: string): Promise<{ succes
         }
       } catch {}
     }
+    invalidateScanCache();
     return { success: true };
   } catch(e) {
     return { success: false };
@@ -926,6 +952,7 @@ ipcMain.handle('library:restoreGame', async (event, id: string): Promise<{ succe
     let hiddenIds = getHiddenIds();
     hiddenIds = hiddenIds.filter(x => x !== id);
     saveHiddenIds(hiddenIds);
+    invalidateScanCache();
     return { success: true };
   } catch(e) {
     return { success: false };
@@ -957,6 +984,7 @@ ipcMain.handle('library:ignoreGame', async (event, id: string): Promise<{ succes
         }
       } catch {}
     }
+    invalidateScanCache();
     return { success: true };
   } catch(e) {
     return { success: false };
@@ -974,6 +1002,7 @@ ipcMain.handle('library:restoreIgnoredGames', async (event): Promise<{ success: 
       saveHiddenIds(hiddenIds);
       saveIgnoredIds([]);
     }
+    invalidateScanCache();
     return { success: true };
   } catch(e) {
     return { success: false };

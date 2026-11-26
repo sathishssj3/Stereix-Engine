@@ -30,8 +30,10 @@ if (!gotTheLock) {
 
 // Disable GPU disk cache in dev mode to prevent Chromium Windows file lock errors (0x5)
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
-// Disable Chromium OS-level restricted token sandbox on Windows to prevent STATUS_BREAKPOINT (0x80000003) crashes
-app.commandLine.appendSwitch('no-sandbox');
+// HIGH-01: Keep Chromium OS sandbox enabled by default; allow explicit opt-out only if a restricted ACL environment triggers 0x80000003
+if (process.env.STEREIX_DISABLE_SANDBOX === '1') {
+  app.commandLine.appendSwitch('no-sandbox');
+}
 
 // Initialize core authorization token for DLL injector validation
 const STEREIX_AUTH_TOKEN = crypto.randomUUID();
@@ -110,7 +112,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false,
+      sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
       preload: path.join(__dirname, 'preload.js'),
@@ -198,11 +200,17 @@ app.whenReady().then(() => {
   const frontendDir = path.join(__dirname, '..', '..', 'frontend-dist');
 
   const handleAppAsset = async (request: Request) => {
-    const url = new URL(request.url);
-    if (url.hostname !== 'app' || request.method !== 'GET') {
-      return new Response('Forbidden', { status: 403 });
+    // MED-06: Guard URL parsing and decodeURIComponent so malformed percent-encoding cannot crash the main process
+    let filePath = '';
+    try {
+      const url = new URL(request.url);
+      if (url.hostname !== 'app' || request.method !== 'GET') {
+        return new Response('Forbidden', { status: 403 });
+      }
+      filePath = decodeURIComponent(url.pathname);
+    } catch {
+      return new Response('Bad Request', { status: 400, headers: { 'Content-Type': 'text/plain' } });
     }
-    let filePath = decodeURIComponent(url.pathname);
     if (filePath.startsWith('/')) filePath = filePath.substring(1);
     if (!filePath || filePath === '' || filePath === '/') filePath = 'index.html';
 

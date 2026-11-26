@@ -1,13 +1,15 @@
 import { app, ipcMain } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { VRConfig } from '../src/types';
 import { assertTrustedIpcSender, gamePathsMap, gameExeMap, validateGameId, validateConfig, safeGamePath } from './utils';
+import { getLocalManifest, compareSemver, getAppVersion } from './updateManager';
 
 const defaultVRConfig: VRConfig = {
   motionAimSensitivity: 1.0,
   useRecommendedResolution: true,
-  srgbCorrection: false,
+  srgbCorrection: true,
   depthSubmission: false,
   rawInputMode: true,
   autoInjectOnLaunch: true,
@@ -130,7 +132,7 @@ const curatedProfiles: Record<string, Partial<VRConfig>> = {
     matrixPrecision: 'Float32',
     motionAimSensitivity: 1.0,
     useRecommendedResolution: true,
-    srgbCorrection: false,
+    srgbCorrection: true,
     depthSubmission: true,
     rawInputMode: true,
     autoInjectOnLaunch: true,
@@ -208,7 +210,7 @@ const curatedProfiles: Record<string, Partial<VRConfig>> = {
 };
 
 function loadProfilesFromDisk(): Record<string, Partial<VRConfig>> {
-  const profiles: Record<string, Partial<VRConfig>> = { ...curatedProfiles };
+  const profiles: Record<string, Partial<VRConfig>> = Object.assign(Object.create(null), curatedProfiles);
   try {
     let userUpdatesProfiles = '';
     let customProfilesDir = '';
@@ -221,6 +223,7 @@ function loadProfilesFromDisk(): Record<string, Partial<VRConfig>> {
     } catch {}
 
     // Check root profiles directory (development, packaged resources, OTA updates, and custom user profiles)
+    // Ordered highest-priority-first, then reversed below because the load loop applies last-writer-wins.
     const localDirs = [
       path.resolve(__dirname, '../../../../stereix-client/profiles'),
       path.resolve(__dirname, '../../../../nexvr-client/profiles'),
@@ -228,30 +231,55 @@ function loadProfilesFromDisk(): Record<string, Partial<VRConfig>> {
       path.resolve(__dirname, '../../profiles'),
       path.join(process.resourcesPath, 'profiles'),
     ];
-    // L-14: In DEV mode, local profiles take precedence over downloaded OTA cache. In packaged mode, OTA hotfix profiles take precedence.
+    const localDirsLowToHigh = [...localDirs].reverse();
+    const localManifest = app?.isPackaged ? getLocalManifest() : null;
+    const hasVerifiedNewerOta = Boolean(
+      localManifest &&
+      localManifest.hashes &&
+      compareSemver(localManifest.engineVersion, getAppVersion()) >= 0
+    );
+
+    // HIGH-13 / BUG-19: Loop is last-writer-wins, so order LOWEST priority first -> HIGHEST priority last.
+    // Dev mode: custom_profiles < local repo profiles (never let OTA cache overwrite local dev profiles).
+    // Packaged mode: bundled local profiles < verified OTA hotfix profiles < user custom_profiles.
     const candidateDirs = (!app?.isPackaged)
       ? [
-          ...localDirs,
           ...(customProfilesDir ? [customProfilesDir] : []),
-          ...(userUpdatesProfiles ? [userUpdatesProfiles] : []),
+          ...localDirsLowToHigh,
         ]
       : [
-          ...(userUpdatesProfiles ? [userUpdatesProfiles] : []),
+          ...localDirsLowToHigh,
+          ...(hasVerifiedNewerOta && userUpdatesProfiles ? [userUpdatesProfiles] : []),
           ...(customProfilesDir ? [customProfilesDir] : []),
-          ...localDirs,
         ];
     for (const pDir of candidateDirs) {
       if (fs.existsSync(pDir)) {
+        const isOtaDir = Boolean(userUpdatesProfiles && pDir === userUpdatesProfiles);
         const files = fs.readdirSync(pDir);
         for (const f of files) {
           if (f.endsWith('.json') && f !== 'schema.json') {
             try {
-              const data = JSON.parse(fs.readFileSync(path.join(pDir, f), 'utf-8'));
+              const fullProfilePath = path.join(pDir, f);
+              const rawBytes = fs.readFileSync(fullProfilePath);
+              if (isOtaDir) {
+                // HIGH-10: Fail-closed SHA-256 verification for every OTA profile against the signed manifest
+                const expectedHash = localManifest?.hashes?.[`profiles/${f}`];
+                if (!expectedHash || typeof expectedHash !== 'string' || expectedHash.trim().length !== 64) {
+                  continue;
+                }
+                const actualHash = crypto.createHash('sha256').update(rawBytes).digest('hex');
+                if (actualHash.toLowerCase() !== expectedHash.toLowerCase()) {
+                  console.warn(`[ConfigManager] Rejecting unverified OTA profile ${f}: SHA-256 mismatch.`);
+                  continue;
+                }
+              }
+              const data = JSON.parse(rawBytes.toString('utf-8'));
               if (data && typeof data.id === 'string') {
-                profiles[data.id] = {
+                const safeProfileId = validateGameId(data.id);
+                profiles[safeProfileId] = {
                   motionAimSensitivity: typeof data.motionAimSensitivity === 'number' ? data.motionAimSensitivity : 1.0,
                   useRecommendedResolution: data.useRecommendedResolution !== false,
-                  srgbCorrection: data.srgbCorrection !== false,
+                  srgbCorrection: typeof data.srgbCorrection === 'boolean' ? data.srgbCorrection : true,
                   depthSubmission: Boolean(data.depthSubmission),
                   rawInputMode: data.rawInputMode !== false,
                   autoInjectOnLaunch: data.autoInjectOnLaunch !== false,
@@ -265,6 +293,8 @@ function loadProfilesFromDisk(): Record<string, Partial<VRConfig>> {
                   brightness: typeof data.brightness === 'number' ? data.brightness : undefined,
                   convergence: typeof data.convergence === 'number' ? data.convergence : undefined,
                   ipd: typeof data.ipd === 'number' ? data.ipd : undefined,
+                  forceCinemaMode: typeof data.forceCinemaMode === 'boolean' ? data.forceCinemaMode : undefined,
+                  theaterDistance: typeof data.theaterDistance === 'number' ? data.theaterDistance : undefined,
                   aiNotes: typeof data.aiNotes === 'string' ? data.aiNotes : undefined,
                 };
               }
@@ -351,13 +381,7 @@ ipcMain.handle('config:read', async (event, id: string): Promise<VRConfig> => {
       if (fs.existsSync(cfgPath)) {
         const content = fs.readFileSync(cfgPath, 'utf-8');
         const parsed = JSON.parse(content);
-        // Auto-heal legacy vrinject.json where srgbCorrection was set to false
-        if (parsed.srgbCorrection === false) {
-          parsed.srgbCorrection = true;
-          try {
-            fs.writeFileSync(cfgPath, JSON.stringify({ ...initialConfig, ...parsed }, null, 2), 'utf-8');
-          } catch {}
-        }
+        // MED-03: Respect explicit user/profile srgbCorrection value (do not force-overwrite false -> true)
         return validateConfig({ ...initialConfig, ...parsed });
       }
     }
@@ -399,7 +423,7 @@ ipcMain.handle('config:write', async (event, id: string, cfg: unknown) => {
     const baseProfile = getActiveProfiles()[validId] || {};
     const finalCfg: VRConfig = {
       ...validCfg,
-      srgbCorrection: validCfg.srgbCorrection !== false,
+      srgbCorrection: validCfg.srgbCorrection,
       engine: validCfg.engine ?? baseProfile.engine,
       api: validCfg.api ?? baseProfile.api,
       reverseZ: validCfg.reverseZ ?? baseProfile.reverseZ,
@@ -407,6 +431,8 @@ ipcMain.handle('config:write', async (event, id: string, cfg: unknown) => {
       matrixPrecision: validCfg.matrixPrecision ?? baseProfile.matrixPrecision,
       convergence: validCfg.convergence ?? baseProfile.convergence,
       ipd: validCfg.ipd ?? baseProfile.ipd,
+      forceCinemaMode: validCfg.forceCinemaMode ?? baseProfile.forceCinemaMode,
+      theaterDistance: validCfg.theaterDistance ?? baseProfile.theaterDistance,
       aiNotes: validCfg.aiNotes ?? baseProfile.aiNotes,
     };
 

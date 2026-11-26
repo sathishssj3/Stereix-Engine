@@ -1,6 +1,8 @@
 #include "rendering/dx12/dx12_stereo_renderer.h"
 #include "rendering/dx12/imgui_dx12_integration.h"
 #include "core/overlay_manager.h"
+#include "core/logger.h"
+#include <algorithm>
 #include <iostream>
 #include <cassert>
 
@@ -14,6 +16,90 @@ static bool SafeGetResourceDesc(ID3D12Resource* res, D3D12_RESOURCE_DESC& outDes
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+}
+
+static int GetDX12CopyFormatFamily(DXGI_FORMAT fmt) {
+    switch (fmt) {
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        case DXGI_FORMAT_R8G8B8A8_UINT:
+        case DXGI_FORMAT_R8G8B8A8_SNORM:
+        case DXGI_FORMAT_R8G8B8A8_SINT:
+            return 1;
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+            return 2;
+        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+        case DXGI_FORMAT_R10G10B10A2_UNORM:
+        case DXGI_FORMAT_R10G10B10A2_UINT:
+            return 3;
+        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
+            return 4;
+        default:
+            return 0;
+    }
+}
+
+static bool SafeCopyDX12Texture(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* dst, ID3D12Resource* src) {
+    if (!cmdList || !dst || !src) return false;
+    D3D12_RESOURCE_DESC dstDesc = {};
+    D3D12_RESOURCE_DESC srcDesc = {};
+    if (!SafeGetResourceDesc(dst, dstDesc) || !SafeGetResourceDesc(src, srcDesc)) {
+        return false;
+    }
+    const int dstFam = GetDX12CopyFormatFamily(dstDesc.Format);
+    const int srcFam = GetDX12CopyFormatFamily(srcDesc.Format);
+    const bool formatCompatible = (dstDesc.Format == srcDesc.Format) || (dstFam != 0 && dstFam == srcFam);
+    if (!formatCompatible) {
+        static bool s_loggedMismatch = false;
+        if (!s_loggedMismatch) {
+            LOG_WARN("DX12StereoRenderer: Skipping incompatible CopyResource (src fmt=%d, dst fmt=%d) to avoid D3D12 device loss (MED-11).",
+                     static_cast<int>(srcDesc.Format), static_cast<int>(dstDesc.Format));
+            s_loggedMismatch = true;
+        }
+        return false;
+    }
+
+    if (dstDesc.Width == srcDesc.Width && dstDesc.Height == srcDesc.Height &&
+        dstDesc.Dimension == srcDesc.Dimension && dstDesc.SampleDesc.Count == srcDesc.SampleDesc.Count) {
+        cmdList->CopyResource(dst, src);
+        return true;
+    }
+
+    // Compatible format family with differing dimensions: use CopyTextureRegion clamped to overlap
+    const UINT copyW = static_cast<UINT>((std::min)(dstDesc.Width, srcDesc.Width));
+    const UINT copyH = (std::min)(dstDesc.Height, srcDesc.Height);
+    if (copyW == 0 || copyH == 0) return false;
+
+    D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+    dstLoc.pResource = dst;
+    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dstLoc.SubresourceIndex = 0;
+
+    D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+    srcLoc.pResource = src;
+    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    srcLoc.SubresourceIndex = 0;
+
+    D3D12_BOX srcBox = {0, 0, 0, copyW, copyH, 1};
+    cmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, &srcBox);
+    return true;
+}
+
+uint32_t DX12StereoRenderer::PrepareNextFrameSlot(DX12FenceManager* fenceManager) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    uint32_t slot = (m_currentFrameIndex++) % MAX_FRAMES_IN_FLIGHT;
+    if (fenceManager && m_frameFences[slot] != 0) {
+        fenceManager->WaitForFenceValue(m_frameFences[slot]);
+        m_frameFences[slot] = 0;
+    }
+    m_preparedSlotIndex = slot;
+    m_hasPreparedSlot = true;
+    return slot;
 }
 
 DX12StereoRenderer::~DX12StereoRenderer() {
@@ -56,7 +142,8 @@ bool DX12StereoRenderer::RenderStereo(
     ID3D12Resource* oxrLeftDest,
     ID3D12Resource* oxrRightDest,
     bool shouldAttemptStereo,
-    ID3D12Resource* uiMask) 
+    ID3D12Resource* uiMask,
+    ID3D12Resource* oxrHudDest) 
 {
     if (!gameQueue || !resourceManager || !psoCache || !stateTracker || !fenceManager) return false;
 
@@ -72,12 +159,16 @@ bool DX12StereoRenderer::RenderStereo(
     
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    // Frame Sequence: advance ring buffer monotonically across frames
-    uint32_t frameIndex = (m_currentFrameIndex++) % MAX_FRAMES_IN_FLIGHT;
-
-    // Ensure the GPU has finished with this allocator before resetting it
-    if (m_frameFences[frameIndex] != 0) {
-        fenceManager->WaitForFenceValue(m_frameFences[frameIndex]);
+    // Frame Sequence: consume prepared slot (already fence-waited before descriptor update) or advance safely
+    uint32_t frameIndex = 0;
+    if (m_hasPreparedSlot) {
+        frameIndex = m_preparedSlotIndex;
+        m_hasPreparedSlot = false;
+    } else {
+        frameIndex = (m_currentFrameIndex++) % MAX_FRAMES_IN_FLIGHT;
+        if (m_frameFences[frameIndex] != 0) {
+            fenceManager->WaitForFenceValue(m_frameFences[frameIndex]);
+        }
     }
     
     m_commandAllocators[frameIndex]->Reset();
@@ -104,16 +195,15 @@ bool DX12StereoRenderer::RenderStereo(
     D3D12_RESOURCE_STATES camInitialState = isBackBuffer ? D3D12_RESOURCE_STATE_PRESENT : D3D12_RESOURCE_STATE_RENDER_TARGET;
 
     // Check PSO availability once, before recording any commands
-    ID3D12Device* device = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12Device> device;
     gameQueue->GetDevice(IID_PPV_ARGS(&device));
     bool hasPso = false;
     ID3D12RootSignature* rootSig = nullptr;
     ID3D12PipelineState* pso = nullptr;
     if (device) {
-        rootSig = psoCache->GetStereoRootSignature(device);
-        pso = psoCache->GetStereoPSO(device);
+        rootSig = psoCache->GetStereoRootSignature(device.Get());
+        pso = psoCache->GetStereoPSO(device.Get());
         hasPso = (rootSig != nullptr && pso != nullptr);
-        device->Release();
     }
 
     ID3D12Resource* leftEye = resourceManager->GetLeftEyeTexture();
@@ -152,8 +242,8 @@ bool DX12StereoRenderer::RenderStereo(
             stateTracker->TransitionResource(oxrRightDest, D3D12_RESOURCE_STATE_COPY_DEST);
             stateTracker->FlushBarriers(cmdList);
 
-            cmdList->CopyResource(oxrLeftDest, camTex);
-            cmdList->CopyResource(oxrRightDest, camTex);
+            SafeCopyDX12Texture(cmdList, oxrLeftDest, camTex);
+            SafeCopyDX12Texture(cmdList, oxrRightDest, camTex);
 
             stateTracker->TransitionResource(camTex, camInitialState);
             stateTracker->TransitionResource(oxrLeftDest, D3D12_RESOURCE_STATE_COMMON);
@@ -209,10 +299,10 @@ bool DX12StereoRenderer::RenderStereo(
     cmdList->ResourceBarrier(2, uavBarriers);
 
     // If in-headset menu is active, draw it directly onto eye buffers in the same command list
-    if (OverlayManager::GetInstance().IsOverlayVisible()) {
+    if (OverlayManager::GetInstance().IsOverlayVisible() && device) {
         DXGI_FORMAT rtvFmt = leftEye->GetDesc().Format;
-        ImGuiDX12Integration::GetInstance().Initialize(device, rtvFmt);
-        ImGuiDX12Integration::GetInstance().Render(device, cmdList, leftEye, rightEye);
+        ImGuiDX12Integration::GetInstance().Initialize(device.Get(), rtvFmt);
+        ImGuiDX12Integration::GetInstance().Render(device.Get(), cmdList, leftEye, rightEye);
     }
 
     // Transition Outputs for OpenXR Copy Source
@@ -230,12 +320,26 @@ bool DX12StereoRenderer::RenderStereo(
     }
     stateTracker->FlushBarriers(cmdList);
 
-    // Copy to OpenXR Swapchain (exact dimensions match eye textures)
+    // Copy to OpenXR Swapchain (format/dimension-safe copy, MED-11)
     if (oxrLeftDest) {
-        cmdList->CopyResource(oxrLeftDest, leftEye);
+        SafeCopyDX12Texture(cmdList, oxrLeftDest, leftEye);
     }
     if (oxrRightDest) {
-        cmdList->CopyResource(oxrRightDest, rightEye);
+        SafeCopyDX12Texture(cmdList, oxrRightDest, rightEye);
+    }
+
+    // Copy floating HUD mask into OpenXR HUD quad swapchain image when active (MED-11)
+    if (uiMask && oxrHudDest) {
+        stateTracker->ForceResourceState(uiMask, D3D12_RESOURCE_STATE_COMMON);
+        stateTracker->TransitionResource(uiMask, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        stateTracker->ForceResourceState(oxrHudDest, D3D12_RESOURCE_STATE_COMMON);
+        stateTracker->TransitionResource(oxrHudDest, D3D12_RESOURCE_STATE_COPY_DEST);
+        stateTracker->FlushBarriers(cmdList);
+
+        SafeCopyDX12Texture(cmdList, oxrHudDest, uiMask);
+
+        stateTracker->TransitionResource(uiMask, D3D12_RESOURCE_STATE_COMMON);
+        stateTracker->TransitionResource(oxrHudDest, D3D12_RESOURCE_STATE_COMMON);
     }
 
     // Transition OpenXR swapchain images back to COMMON for OpenXR presentation

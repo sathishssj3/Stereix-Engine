@@ -3,9 +3,12 @@
 // Compiles as d3d11.dll and forwards all real Direct3D 11 exports to the
 // genuine system d3d11.dll located in the Windows System32 directory.
 //
-// Hardened against loader-lock violations (M-1) and persistence vector (H-1):
-// System DLL resolution and vrinject chain-loading are deferred outside DllMain,
-// and vrinject.dll integrity is verified via SHA-256 against EXPECTED_DLL_HASH.
+// Hardened against loader-lock violations (M-1/HIGH-06), TOCTOU (CRIT-02), and
+// persistence vector (H-1): System DLL resolution and vrinject chain-loading are
+// deferred outside DllMain, vrinject.dll is opened read-locked (FILE_SHARE_READ
+// only, no reparse points) and verified via SHA-256 against EXPECTED_DLL_HASH
+// while holding the handle across LoadLibraryW, and FreeLibrary is never called
+// inside DllMain.
 
 #include <windows.h>
 #include <mutex>
@@ -22,88 +25,120 @@ static HMODULE g_realD3D11 = nullptr;
 static HMODULE g_proxyModule = nullptr;
 static std::once_flag g_initOnce;
 
-bool VerifyDllIntegrity(const char* path) {
-    if (!path) return false;
-    DWORD attrs = GetFileAttributesA(path);
-    if (attrs == INVALID_FILE_ATTRIBUTES) return false;
-
-    FILE* f = nullptr;
-    if (fopen_s(&f, path, "rb") != 0 || !f) return false;
-    char mz[2] = {0};
-    size_t n = fread(mz, 1, 2, f);
-    fclose(f);
-    if (n != 2 || mz[0] != 'M' || mz[1] != 'Z') return false;
-
-    BCRYPT_ALG_HANDLE hAlg = NULL;
-    BCRYPT_HASH_HANDLE hHash = NULL;
-    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, NULL, 0) != 0) return false;
-
-    DWORD cbData = 0, cbHashObject = 0;
-    if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbHashObject, sizeof(DWORD), &cbData, 0) != 0) {
-        BCryptCloseAlgorithmProvider(hAlg, 0);
+bool VerifyAndLoadLockedDll(const wchar_t* path) {
+    if (!path || !*path) return false;
+    DWORD attrs = GetFileAttributesW(path);
+    if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) != 0) {
         return false;
     }
+
+    HANDLE hFile = CreateFileW(
+        path,
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) return false;
+
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!GetFileInformationByHandle(hFile, &info) ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) != 0) {
+        CloseHandle(hFile);
+        return false;
+    }
+
+    BCRYPT_ALG_HANDLE hAlg = nullptr;
+    BCRYPT_HASH_HANDLE hHash = nullptr;
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0) {
+        CloseHandle(hFile);
+        return false;
+    }
+
+    DWORD cbData = 0, cbHashObject = 0, cbHash = 0;
+    if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PBYTE>(&cbHashObject), sizeof(DWORD), &cbData, 0) != 0 ||
+        BCryptGetProperty(hAlg, BCRYPT_HASH_LENGTH, reinterpret_cast<PBYTE>(&cbHash), sizeof(DWORD), &cbData, 0) != 0) {
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        CloseHandle(hFile);
+        return false;
+    }
+
     std::vector<BYTE> pbHashObject(cbHashObject);
-    DWORD cbHash = 0;
-    if (BCryptGetProperty(hAlg, BCRYPT_HASH_LENGTH, (PBYTE)&cbHash, sizeof(DWORD), &cbData, 0) != 0) {
-        BCryptCloseAlgorithmProvider(hAlg, 0);
-        return false;
-    }
     std::vector<BYTE> pbHash(cbHash);
-    if (BCryptCreateHash(hAlg, &hHash, pbHashObject.data(), cbHashObject, NULL, 0, 0) != 0) {
+    if (BCryptCreateHash(hAlg, &hHash, pbHashObject.data(), cbHashObject, nullptr, 0, 0) != 0) {
         BCryptCloseAlgorithmProvider(hAlg, 0);
+        CloseHandle(hFile);
         return false;
     }
 
+    BYTE buffer[8192];
+    DWORD readBytes = 0;
+    bool firstChunk = true;
+    bool peValid = false;
     bool hashOk = false;
-    if (fopen_s(&f, path, "rb") == 0 && f) {
-        BYTE buffer[8192];
-        size_t readBytes = 0;
-        while ((readBytes = fread(buffer, 1, sizeof(buffer), f)) > 0) {
-            BCryptHashData(hHash, buffer, (ULONG)readBytes, 0);
-        }
-        fclose(f);
 
-        if (BCryptFinishHash(hHash, pbHash.data(), cbHash, 0) == 0) {
-            std::wstring computedHash;
-            wchar_t hex[3];
-            for (DWORD i = 0; i < cbHash; i++) {
-                swprintf_s(hex, L"%02X", pbHash[i]);
-                computedHash += hex;
-            }
-            if (computedHash == EXPECTED_DLL_HASH) {
-                hashOk = true;
+    while (ReadFile(hFile, buffer, sizeof(buffer), &readBytes, nullptr) && readBytes > 0) {
+        if (firstChunk) {
+            firstChunk = false;
+            if (readBytes >= 2 && buffer[0] == 'M' && buffer[1] == 'Z') {
+                peValid = true;
+            } else {
+                break;
             }
         }
+        if (BCryptHashData(hHash, buffer, readBytes, 0) != 0) {
+            peValid = false;
+            break;
+        }
+    }
+
+    if (peValid && BCryptFinishHash(hHash, pbHash.data(), cbHash, 0) == 0) {
+        std::wstring computedHash;
+        computedHash.reserve(static_cast<size_t>(cbHash) * 2);
+        wchar_t hex[3];
+        for (DWORD i = 0; i < cbHash; ++i) {
+            swprintf_s(hex, L"%02X", pbHash[i]);
+            computedHash += hex;
+        }
+        hashOk = (computedHash == EXPECTED_DLL_HASH);
     }
 
     BCryptDestroyHash(hHash);
     BCryptCloseAlgorithmProvider(hAlg, 0);
-    return hashOk;
+
+    bool loaded = false;
+    if (hashOk) {
+        // Hold hFile open across LoadLibraryW to eliminate TOCTOU
+        loaded = (LoadLibraryW(path) != nullptr);
+    }
+
+    CloseHandle(hFile);
+    return loaded;
 }
 
 void EnsureInitialized() {
     std::call_once(g_initOnce, []() {
         // Step 1: Resolve system d3d11.dll from System32
-        char sysDir[MAX_PATH] = {};
-        UINT len = GetSystemDirectoryA(sysDir, MAX_PATH);
+        wchar_t sysDir[MAX_PATH] = {};
+        UINT len = GetSystemDirectoryW(sysDir, MAX_PATH);
         if (len > 0 && len < MAX_PATH) {
-            char realPath[MAX_PATH] = {};
-            strncpy_s(realPath, sysDir, _TRUNCATE);
-            strncat_s(realPath, "\\d3d11.dll", _TRUNCATE);
-            g_realD3D11 = LoadLibraryA(realPath);
+            std::wstring realPath(sysDir, len);
+            realPath += L"\\d3d11.dll";
+            g_realD3D11 = LoadLibraryW(realPath.c_str());
         }
 
-        // Step 2: Verify and chain-load vrinject.dll
+        // Step 2: Verify and chain-load vrinject.dll without TOCTOU
         if (g_proxyModule) {
-            char szPath[MAX_PATH] = {};
-            GetModuleFileNameA(g_proxyModule, szPath, MAX_PATH);
-            char* lastSlash = strrchr(szPath, '\\');
-            if (lastSlash) {
-                *(lastSlash + 1) = '\0';
-                strncat_s(szPath, "vrinject.dll", _TRUNCATE);
-                if (VerifyDllIntegrity(szPath)) {
-                    LoadLibraryA(szPath);
+            wchar_t szPath[1024] = {};
+            DWORD pathLen = GetModuleFileNameW(g_proxyModule, szPath, static_cast<DWORD>(std::size(szPath)));
+            if (pathLen > 0 && pathLen < std::size(szPath)) {
+                std::wstring dllPath(szPath, pathLen);
+                size_t lastSlash = dllPath.find_last_of(L'\\');
+                if (lastSlash != std::wstring::npos) {
+                    dllPath.resize(lastSlash + 1);
+                    dllPath += L"vrinject.dll";
+                    VerifyAndLoadLockedDll(dllPath.c_str());
                 }
             }
         }
@@ -289,10 +324,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         DisableThreadLibraryCalls(hModule);
         g_proxyModule = hModule;
     } else if (ul_reason_for_call == DLL_PROCESS_DETACH) {
-        if (g_realD3D11) {
-            FreeLibrary(g_realD3D11);
-            g_realD3D11 = nullptr;
-        }
+        // Do NOT call FreeLibrary inside DllMain (loader-lock deadlock violation, HIGH-06).
+        g_realD3D11 = nullptr;
     }
     return TRUE;
 }

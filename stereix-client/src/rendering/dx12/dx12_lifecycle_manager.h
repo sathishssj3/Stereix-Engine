@@ -22,6 +22,7 @@ struct Dx12SwapchainResources {
     UINT width = 0;
     UINT height = 0;
     bool fullscreen = false;
+    HWND outputWindow = nullptr;
 };
 
 class Dx12LifecycleManager {

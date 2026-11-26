@@ -155,10 +155,15 @@ ipcMain.handle('log:export', async (event, lines: unknown) => {
     `NexVR_Diag_Report_${Date.now()}.zip`
   );
 
-  const psCommand = `Compress-Archive -LiteralPath '${stagingDir.replace(/'/g, "''")}\\*' -DestinationPath '${zipPath.replace(/'/g, "''")}' -Force`;
+  const psCommand = 'Get-ChildItem -LiteralPath $env:STEREIX_EXPORT_SRC | Compress-Archive -DestinationPath $env:STEREIX_EXPORT_ZIP -Force';
   await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
     windowsHide: true,
     timeout: 30000,
+    env: {
+      ...process.env,
+      STEREIX_EXPORT_SRC: stagingDir,
+      STEREIX_EXPORT_ZIP: zipPath,
+    },
   });
 
   try {

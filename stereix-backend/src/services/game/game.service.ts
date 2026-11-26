@@ -45,15 +45,24 @@ export class GameService {
   }
 
   async detectGameByExecutable(exeName: string) {
-    const normalizedExe = exeName.toLowerCase();
+    const trimmedExe = String(exeName || '').trim();
+    if (!trimmedExe || trimmedExe.length > 260) {
+      return null;
+    }
+    const normalizedExe = trimmedExe.toLowerCase();
     const cacheKey = `game:exe:${normalizedExe}`;
     const cached = await getCached(cacheKey);
     if (cached) return cached;
 
-    const games = await db.game.findMany();
-    const match = games.find((g: any) =>
-      g.exeNames.some((e: any) => e.toLowerCase() === normalizedExe)
-    );
+    // HIGH-03: Avoid full-table db.game.findMany() scan on every cache miss; query directly via array membership
+    const candidates = Array.from(new Set([normalizedExe, trimmedExe]));
+    const match = await db.game.findFirst({
+      where: {
+        exeNames: {
+          hasSome: candidates,
+        },
+      },
+    });
 
     if (!match) {
       return null;
@@ -71,14 +80,20 @@ export class GameService {
     antiCheat?: string;
     supported?: boolean;
   }) {
+    const normalizedData = {
+      ...data,
+      exeNames: data.exeNames.map((e) => e.trim().toLowerCase()).filter(Boolean),
+    };
     const game = await db.game.upsert({
       where: { slug: data.slug },
-      update: data,
-      create: data,
+      update: normalizedData,
+      create: normalizedData,
     });
 
     await invalidateCache('games:*');
     await invalidateCache(`game:slug:${data.slug}`);
+    // HIGH-03: Invalidate executable lookup cache whenever game metadata changes
+    await invalidateCache('game:exe:*');
     return game;
   }
 }

@@ -2,6 +2,8 @@
 #include "core/logger.h"
 #include "core/subsystem_context.h"
 #include "core/config_manager.h"
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace vrinject {
@@ -73,6 +75,33 @@ bool StereoRenderer::UpdateConstantBuffer(ID3D11DeviceContext* context,
         constants->horizonRollCorrection = 0.0f;
         constants->horizonLockStrength = 0.0f;
     }
+
+    // OpenXR Per-Eye Asymmetric FOV Tangents & Stereo Calibration
+    for (int i = 0; i < 4; ++i) {
+        constants->leftEyeFovTan[i] = frameCtx.leftEye.fovTan[i];
+        constants->rightEyeFovTan[i] = frameCtx.rightEye.fovTan[i];
+    }
+    float aspect = (frameCtx.viewport.height > 0)
+        ? (static_cast<float>(frameCtx.viewport.width) / static_cast<float>(frameCtx.viewport.height))
+        : (16.0f / 9.0f);
+    if (aspect < 0.5f || aspect > 4.0f) aspect = 16.0f / 9.0f;
+
+    float gameTanX = 1.0f; // 90 deg horizontal FOV default
+    float gameTanY = 1.0f / aspect;
+    float p00 = std::abs(frameCtx.camera.projection.m[0][0]);
+    float p11 = std::abs(frameCtx.camera.projection.m[1][1]);
+    if (p00 > 0.25f && p00 < 5.0f && p11 > 0.25f && p11 < 5.0f) {
+        gameTanX = std::clamp(1.0f / p00, 0.45f, 1.85f);
+        gameTanY = std::clamp(1.0f / p11, 0.25f, 1.40f);
+    }
+    constants->gameTanHalfFovX = gameTanX;
+    constants->gameTanHalfFovY = gameTanY;
+    constants->stereoIpd = (frameCtx.constants.ipd > 0.01f) ? frameCtx.constants.ipd : 0.064f;
+    constants->stereoConvergence = (frameCtx.constants.convergence > 0.1f) ? frameCtx.constants.convergence : 3.5f;
+    constants->isReversedZ = frameCtx.camera.reversedZ ? 1u : 0u;
+    constants->isLeftHanded = frameCtx.camera.isLeftHanded ? 1u : 0u;
+    constants->nearPlane = (frameCtx.constants.nearPlane > 0.001f) ? frameCtx.constants.nearPlane : 0.1f;
+    constants->farPlane = (frameCtx.constants.farPlane > constants->nearPlane) ? frameCtx.constants.farPlane : 1000.0f;
 
     context->Unmap(cb, 0);
     return true;

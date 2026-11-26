@@ -92,9 +92,27 @@ void DX12GraphicsBackend::Shutdown() {
     if (m_fenceManager) m_fenceManager->Shutdown();
     if (m_stateTracker) m_stateTracker->Clear();
 
+    m_oxrLeftDest = nullptr;
+    m_oxrRightDest = nullptr;
+    m_oxrHudDest = nullptr;
     m_commandQueue.Reset();
     m_device.Reset();
     m_state = StereoRendererState::UNINITIALIZED;
+}
+
+void DX12GraphicsBackend::ReleaseResources() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_fenceManager && m_commandQueue) {
+        uint64_t val = m_fenceManager->Signal(m_commandQueue.Get());
+        m_fenceManager->WaitForFenceValue(val);
+        m_fenceManager->ProcessDeferredReleases();
+    }
+    if (m_stateTracker) {
+        m_stateTracker->Clear();
+    }
+    m_oxrLeftDest = nullptr;
+    m_oxrRightDest = nullptr;
+    m_oxrHudDest = nullptr;
 }
 
 void DX12GraphicsBackend::SetState(StereoRendererState state) {
@@ -154,8 +172,11 @@ void DX12GraphicsBackend::RenderStereo(
     // Free resources that completed execution on GPU
     m_fenceManager->ProcessDeferredReleases();
 
+    // Wait for the next ring-buffer slot's GPU fence BEFORE updating CBV/SRV descriptors (HIGH-08)
+    const uint32_t frameSlot = m_renderer->PrepareNextFrameSlot(m_fenceManager.get());
+
     // Update resources based on new snapshots (like handling resizes) and write stereo matrices
-    m_resourceManager->UpdateFrameResources(m_device.Get(), leftEye, rightEye, camSnapshot, depthSnapshot, shouldAttemptStereo);
+    m_resourceManager->UpdateFrameResources(m_device.Get(), leftEye, rightEye, camSnapshot, depthSnapshot, shouldAttemptStereo, frameSlot);
 
     // Perform rendering dispatch and synchronize
     bool success = m_renderer->RenderStereo(
@@ -169,7 +190,8 @@ void DX12GraphicsBackend::RenderStereo(
         m_oxrLeftDest,
         m_oxrRightDest,
         shouldAttemptStereo,
-        uiMaskHandle ? (ID3D12Resource*)uiMaskHandle : nullptr);
+        uiMaskHandle ? (ID3D12Resource*)uiMaskHandle : nullptr,
+        m_oxrHudDest);
         
     if (success) {
         m_state = StereoRendererState::READY;
@@ -260,18 +282,42 @@ void DX12GraphicsBackend::SubmitStereoFrame(
 
             SetOpenXRSwapchainImages(leftDest, rightDest);
 
-            RenderStereo(currentSnapshot, camSnapshot, depthSnapshot, params, shouldAttemptStereo, uiMaskHandle);
-            bool stereoOk = (m_state == StereoRendererState::READY);
-
-            // Handle floating HUD quad submission if UI layer is detected
+            // Acquire floating HUD quad image BEFORE RenderStereo so DX12StereoRenderer copies uiMaskHandle into it (MED-11, HIGH-09)
+            bool hudAcquired = false;
+            bool hudCopied = false;
+            {
+                std::lock_guard<std::mutex> hudLock(m_mutex);
+                m_oxrHudDest = nullptr;
+            }
             if (uiMaskHandle && oxrSwapchain && oxrSwapchain->GetHudSwapchain() != XR_NULL_HANDLE) {
                 uint32_t hudImageIndex = 0;
                 if (oxrSwapchain->AcquireHudImage(hudImageIndex)) {
+                    hudAcquired = true;
                     if (oxrSwapchain->WaitHudImage()) {
-                        oxrSwapchain->ReleaseHudImage();
-                        oxrSubmitter->SetHudQuad(oxrSwapchain->GetHudSwapchain(), currentSnapshot.width, currentSnapshot.height);
+                        ID3D12Resource* hudDest = oxrSwapchain->GetHudSwapchainImageDX12(hudImageIndex);
+                        if (hudDest) {
+                            std::lock_guard<std::mutex> hudLock(m_mutex);
+                            m_oxrHudDest = hudDest;
+                            hudCopied = true;
+                        }
                     }
                 }
+            }
+
+            RenderStereo(currentSnapshot, camSnapshot, depthSnapshot, params, shouldAttemptStereo, uiMaskHandle);
+            bool stereoOk = (m_state == StereoRendererState::READY);
+
+            {
+                std::lock_guard<std::mutex> hudLock(m_mutex);
+                m_oxrHudDest = nullptr;
+            }
+            if (hudAcquired && oxrSwapchain) {
+                oxrSwapchain->ReleaseHudImage();
+            }
+            if (stereoOk && hudCopied && oxrSwapchain) {
+                const uint32_t hudW = oxrSwapchain->GetHudWidth() > 0 ? oxrSwapchain->GetHudWidth() : currentSnapshot.width;
+                const uint32_t hudH = oxrSwapchain->GetHudHeight() > 0 ? oxrSwapchain->GetHudHeight() : currentSnapshot.height;
+                oxrSubmitter->SetHudQuad(oxrSwapchain->GetHudSwapchain(), hudW, hudH);
             } else {
                 oxrSubmitter->ClearHudQuad();
             }

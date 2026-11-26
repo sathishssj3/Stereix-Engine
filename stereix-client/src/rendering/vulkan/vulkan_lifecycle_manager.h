@@ -22,6 +22,7 @@ public:
     void OnSwapchainDestroyed(VkDevice device, VkSwapchainKHR swapchain);
 
     void OnSurfaceDestroyed(VkInstance instance, VkSurfaceKHR surface);
+    void SetOutputWindow(void* hwnd);
 
     // Call from ProcessPresentVulkan or vkQueuePresentKHR hook
     RenderFrameSnapshot CreateSnapshot(VkQueue presentQueue);
@@ -61,6 +62,7 @@ private:
     uint32_t m_width = 0;
     uint32_t m_height = 0;
     VkFormat m_format = VK_FORMAT_UNDEFINED;
+    void* m_outputWindow = nullptr;
 };
 
 } // namespace vulkan

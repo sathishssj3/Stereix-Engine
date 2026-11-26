@@ -77,6 +77,10 @@ public:
     SubmitterState GetState() const { return state_; }
     void ResetState() { state_ = SubmitterState::WAIT_FRAME; }
 
+    // Non-blocking shutdown signal so FrameCoordinator can destroy the OpenXR session
+    // (unblocking any active xrWaitFrame) before joining the pacing thread (HIGH-09).
+    void BeginShutdown();
+
     struct HudQuadConfig {
         bool enabled = false;
         XrSwapchain swapchain = XR_NULL_HANDLE;
@@ -96,6 +100,7 @@ public:
     };
 
     void SetHudQuad(XrSwapchain swapchain, uint32_t width, uint32_t height, float distance = 0.95f, float sizeX = 1.2f, float sizeY = 0.675f);
+    void SetHudQuadAnchored(XrSwapchain swapchain, uint32_t width, uint32_t height, const XrPosef& headPose, bool recenter, float distance = 1.45f, float sizeX = 1.35f, float sizeY = 0.76f);
     void ClearHudQuad();
     const HudQuadConfig& GetHudQuadConfig() const { return hudQuadConfig_; }
 
@@ -114,7 +119,7 @@ private:
     void StopPacingThread();
     void PacingThreadLoop();
     bool WaitAndBeginFrame(XrSession session);
-    bool ConsumePacedFrameState(XrSession session, XrFrameState& outFrameState);
+    bool ConsumePacedFrameState(XrSession session, XrFrameState& outFrameState, bool& outPacingBusyOrFailed);
     void TriggerNextPacingWait(XrSession session);
 
     OpenXRHealthMonitor* healthMonitor_ = nullptr;
@@ -142,7 +147,9 @@ private:
     XrFrameState pacingFrameState_{XR_TYPE_FRAME_STATE};
     std::atomic<bool> pacingRunning_{false};
     bool pacingWaitRequested_ = false;
+    bool pacingInFlight_ = false;
     bool pacingFrameReady_ = false;
+    bool pacingFailed_ = false;
 };
 
 } // namespace openxr

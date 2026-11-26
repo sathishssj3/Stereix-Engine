@@ -96,7 +96,7 @@ public:
 
         size_t pos = 0;
         while ((pos = safeMessage.find(":\\", pos)) != std::string::npos) {
-            if (pos > 0 && isalpha(safeMessage[pos - 1])) {
+            if (pos > 0 && std::isalpha(static_cast<unsigned char>(safeMessage[pos - 1]))) {
                 size_t pathStart = pos - 1;
                 size_t pathEnd = pathStart;
                 size_t lastSlash = pathStart;
@@ -181,10 +181,44 @@ private:
 
 } // namespace vrinject
 
+#include <array>
+
+namespace vrinject {
+namespace detail {
+
+template <size_t N>
+consteval size_t BasenameOffset(const char (&path)[N]) {
+    size_t last = 0;
+    for (size_t i = 0; i + 1 < N; ++i) {
+        if (path[i] == '\\' || path[i] == '/') {
+            last = i + 1;
+        }
+    }
+    return last;
+}
+
+template <size_t N, size_t Offset>
+struct StaticBasename {
+    char data[N - Offset]{};
+    consteval StaticBasename(const char (&path)[N]) {
+        for (size_t i = 0; i < N - Offset; ++i) {
+            data[i] = path[Offset + i];
+        }
+    }
+};
+
+} // namespace detail
+} // namespace vrinject
+
+#define VRINJECT_FILE_BASENAME ([]() -> const char* { \
+    static constexpr vrinject::detail::StaticBasename<sizeof(__FILE__), vrinject::detail::BasenameOffset(__FILE__)> kBase(__FILE__); \
+    return kBase.data; \
+}())
+
 #ifndef NDEBUG
 #define LOG_DEBUG(fmt, ...) do { \
     if (auto logger = vrinject::SubsystemContext::Get().GetLogger()) { \
-        logger->Log(vrinject::ILogger::Level::Debug, __FILE__, __LINE__, fmt, ##__VA_ARGS__); \
+        logger->Log(vrinject::ILogger::Level::Debug, VRINJECT_FILE_BASENAME, __LINE__, fmt, ##__VA_ARGS__); \
     } \
 } while(0)
 #else
@@ -193,19 +227,19 @@ private:
 
 #define LOG_INFO(fmt, ...) do { \
     if (auto logger = vrinject::SubsystemContext::Get().GetLogger()) { \
-        logger->Log(vrinject::ILogger::Level::Info, __FILE__, __LINE__, fmt, ##__VA_ARGS__); \
+        logger->Log(vrinject::ILogger::Level::Info, VRINJECT_FILE_BASENAME, __LINE__, fmt, ##__VA_ARGS__); \
     } \
 } while(0)
 
 #define LOG_WARN(fmt, ...) do { \
     if (auto logger = vrinject::SubsystemContext::Get().GetLogger()) { \
-        logger->Log(vrinject::ILogger::Level::Warn, __FILE__, __LINE__, fmt, ##__VA_ARGS__); \
+        logger->Log(vrinject::ILogger::Level::Warn, VRINJECT_FILE_BASENAME, __LINE__, fmt, ##__VA_ARGS__); \
     } \
 } while(0)
 
 #define LOG_ERROR(fmt, ...) do { \
     if (auto logger = vrinject::SubsystemContext::Get().GetLogger()) { \
-        logger->Log(vrinject::ILogger::Level::Error, __FILE__, __LINE__, fmt, ##__VA_ARGS__); \
+        logger->Log(vrinject::ILogger::Level::Error, VRINJECT_FILE_BASENAME, __LINE__, fmt, ##__VA_ARGS__); \
     } \
 } while(0)
 

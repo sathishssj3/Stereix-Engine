@@ -14,6 +14,7 @@ public:
     bool Initialize(ID3D11Device* device, ID3D11DeviceContext* context);
     void Render(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11RenderTargetView* rtv);
     void Render(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* leftDest, ID3D11Texture2D* rightDest);
+    bool RenderToOverlayQuad(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* hudTexture);
     void RenderToTexture(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* targetTexture);
     void Shutdown();
     void InvalidateDeviceObjects();
@@ -30,6 +31,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_cachedTextureLeft;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_cachedRtvRight;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_cachedTextureRight;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_cachedRtvHud;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_cachedTextureHud;
 };
 
 } // namespace vrinject

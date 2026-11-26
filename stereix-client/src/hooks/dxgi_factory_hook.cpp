@@ -9,6 +9,7 @@
 #include "heuristics/depth_lock_manager.h"
 #include "heuristics/depth_candidate_collector.h"
 #include "rendering/dx12/dx12_descriptor_tracker.h"
+#include <atomic>
 #include <mutex>
 
 namespace vrinject {
@@ -22,8 +23,28 @@ CreateSwapChainForHwnd_t OriginalCreateSwapChainForHwnd = nullptr;
 
 Microsoft::WRL::ComPtr<ID3D12CommandQueue> g_capturedCommandQueue;
 std::mutex g_mutex;
+static std::atomic<int> g_suppressCaptureDepth{0};
+
+void BeginInternalInit() {
+    g_suppressCaptureDepth.fetch_add(1, std::memory_order_acq_rel);
+}
+
+void EndInternalInit() {
+    int prev = g_suppressCaptureDepth.fetch_sub(1, std::memory_order_acq_rel);
+    if (prev <= 0) {
+        g_suppressCaptureDepth.store(0, std::memory_order_release);
+    }
+}
+
+bool IsInternalInitSuppressed() {
+    return g_suppressCaptureDepth.load(std::memory_order_acquire) > 0;
+}
 
 HRESULT __stdcall hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI_SWAP_CHAIN_DESC* pDesc, IDXGISwapChain** ppSwapChain) {
+    if (IsInternalInitSuppressed()) {
+        return OriginalCreateSwapChain ? OriginalCreateSwapChain(pFactory, pDevice, pDesc, ppSwapChain) : DXGI_ERROR_INVALID_CALL;
+    }
+
     LOG_INFO("DXGIFactoryHook: CreateSwapChain called");
 
     if (vrinject::vulkan::VulkanLifecycleManager::Get().GetState() == vrinject::RenderState::RUNNING) {
@@ -83,6 +104,10 @@ HRESULT __stdcall hkCreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, D
 }
 
 HRESULT __stdcall hkCreateSwapChainForHwnd(IDXGIFactory2* pFactory, IUnknown* pDevice, HWND hWnd, const DXGI_SWAP_CHAIN_DESC1* pDesc, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc, IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain) {
+    if (IsInternalInitSuppressed()) {
+        return OriginalCreateSwapChainForHwnd ? OriginalCreateSwapChainForHwnd(pFactory, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput, ppSwapChain) : DXGI_ERROR_INVALID_CALL;
+    }
+
     LOG_INFO("DXGIFactoryHook: CreateSwapChainForHwnd called");
 
     if (vrinject::vulkan::VulkanLifecycleManager::Get().GetState() == vrinject::RenderState::RUNNING) {
@@ -161,24 +186,16 @@ bool Initialize() {
 
     if (createSwapChainAddress && MH_CreateHook(createSwapChainAddress, (void*)hkCreateSwapChain, (void**)&OriginalCreateSwapChain) == MH_OK) {
         g_targetCreateSwapChain = createSwapChainAddress;
-        if (MH_EnableHook(createSwapChainAddress) == MH_OK) {
-            hookedAny = true;
-            LOG_INFO("DXGIFactoryHook: CreateSwapChain hooked successfully");
-        } else {
-            LOG_WARN("DXGIFactoryHook: Failed to enable CreateSwapChain hook");
-        }
+        hookedAny = true;
+        LOG_INFO("DXGIFactoryHook: CreateSwapChain hook created (deferred enable until HookManager::Commit)");
     } else {
         LOG_WARN("DXGIFactoryHook: Failed to hook CreateSwapChain (continuing to CreateSwapChainForHwnd)");
     }
 
     if (createSwapChainForHwndAddress && MH_CreateHook(createSwapChainForHwndAddress, (void*)hkCreateSwapChainForHwnd, (void**)&OriginalCreateSwapChainForHwnd) == MH_OK) {
         g_targetCreateSwapChainForHwnd = createSwapChainForHwndAddress;
-        if (MH_EnableHook(createSwapChainForHwndAddress) == MH_OK) {
-            hookedAny = true;
-            LOG_INFO("DXGIFactoryHook: CreateSwapChainForHwnd hooked successfully");
-        } else {
-            LOG_WARN("DXGIFactoryHook: Failed to enable CreateSwapChainForHwnd hook");
-        }
+        hookedAny = true;
+        LOG_INFO("DXGIFactoryHook: CreateSwapChainForHwnd hook created (deferred enable until HookManager::Commit)");
     } else {
         LOG_WARN("DXGIFactoryHook: Failed to hook CreateSwapChainForHwnd");
     }
@@ -195,12 +212,21 @@ bool Initialize() {
 void Shutdown() {
     if (g_targetCreateSwapChain) {
         MH_DisableHook(g_targetCreateSwapChain);
+        MH_RemoveHook(g_targetCreateSwapChain);
         g_targetCreateSwapChain = nullptr;
+        OriginalCreateSwapChain = nullptr;
     }
     if (g_targetCreateSwapChainForHwnd) {
         MH_DisableHook(g_targetCreateSwapChainForHwnd);
+        MH_RemoveHook(g_targetCreateSwapChainForHwnd);
         g_targetCreateSwapChainForHwnd = nullptr;
+        OriginalCreateSwapChainForHwnd = nullptr;
     }
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_capturedCommandQueue.Reset();
+}
+
+void ClearCapturedCommandQueue() {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_capturedCommandQueue.Reset();
 }

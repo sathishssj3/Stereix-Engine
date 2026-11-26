@@ -4,11 +4,13 @@ import { z } from 'zod';
 dotenv.config();
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  // HIGH-02: Fail-closed production default when NODE_ENV is omitted
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('production'),
   PORT: z.coerce.number().default(4000),
   DATABASE_URL: z.string().default('postgresql://nexvr:nexvr_password@localhost:5432/nexvr_db?schema=public'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
-  JWT_SECRET: z.string().default('nexvr-enterprise-jwt-super-secret-key-change-in-prod'),
+  JWT_SECRET: z.string().optional(),
+  JWT_REFRESH_SECRET: z.string().min(32).optional(),
   JWT_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
   AWS_REGION: z.string().default('us-east-1'),
@@ -36,6 +38,9 @@ const envSchema = z.object({
       });
     }
   }
-});
+}).transform((data) => ({
+  ...data,
+  JWT_SECRET: data.JWT_SECRET || 'dev-only-ephemeral-jwt-secret-not-for-production-use',
+}));
 
 export const config = envSchema.parse(process.env);

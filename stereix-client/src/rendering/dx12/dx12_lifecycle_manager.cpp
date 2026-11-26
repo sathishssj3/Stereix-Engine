@@ -142,6 +142,7 @@ bool Dx12LifecycleManager::Rebuild() {
     m_swapchainResources.width = desc.BufferDesc.Width;
     m_swapchainResources.height = desc.BufferDesc.Height;
     m_swapchainResources.format = desc.BufferDesc.Format;
+    m_swapchainResources.outputWindow = desc.OutputWindow;
     
     BOOL fullscreen = FALSE;
     m_swapchainResources.swapChain->GetFullscreenState(&fullscreen, nullptr);
@@ -215,6 +216,7 @@ void Dx12LifecycleManager::ResetSwapchain() {
 
     m_swapchainResources.backBuffer.Reset();
     m_swapchainResources.swapChain.Reset();
+    m_swapchainResources.outputWindow = nullptr;
     m_swapchainResources.width = 0;
     m_swapchainResources.height = 0;
     m_swapchainResources.format = DXGI_FORMAT_UNKNOWN;
@@ -261,6 +263,7 @@ bool Dx12LifecycleManager::Recover() {
     m_deviceResources.commandQueue.Reset();
     m_deviceResources.device.Reset();
     m_swapchainResources.swapChain.Reset();
+    m_swapchainResources.outputWindow = nullptr;
 
     // Typically, the game will create a new device and swapchain, which we will hook on the next Present.
     return true;
@@ -280,6 +283,7 @@ RenderFrameSnapshot Dx12LifecycleManager::CreateSnapshot() {
     snap.nativeDevice = m_deviceResources.device.Get();
     snap.nativeContext = m_deviceResources.commandQueue.Get();
     snap.nativeSwapchain = m_swapchainResources.swapChain.Get();
+    snap.nativeHwnd = m_swapchainResources.outputWindow;
     snap.backBuffer = m_swapchainResources.backBuffer.Get();
     snap.format = m_swapchainResources.format;
     snap.width = m_swapchainResources.width;
@@ -295,6 +299,7 @@ void Dx12LifecycleManager::Shutdown() {
     m_deviceResources.commandQueue.Reset();
     m_deviceResources.device.Reset();
     m_swapchainResources.swapChain.Reset();
+    m_swapchainResources.outputWindow = nullptr;
     m_state.store(RenderState::STOPPED, std::memory_order_release);
     LOG_INFO("Dx12LifecycleManager: Shutdown complete");
 }
@@ -308,6 +313,7 @@ void Dx12LifecycleManager::Reset() {
     m_deviceResources.commandQueue.Reset();
     m_deviceResources.device.Reset();
     m_swapchainResources.swapChain.Reset();
+    m_swapchainResources.outputWindow = nullptr;
 }
 
 } // namespace vrinject

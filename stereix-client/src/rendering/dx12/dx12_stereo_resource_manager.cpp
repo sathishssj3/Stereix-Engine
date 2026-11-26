@@ -2,6 +2,8 @@
 #include "rendering/dx12/dx12_lifecycle_manager.h"
 #include "core/subsystem_context.h"
 #include "core/config_manager.h"
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 
 namespace vrinject {
@@ -87,10 +89,12 @@ bool DX12StereoResourceManager::HandleResize(uint32_t width, uint32_t height) {
     m_currentWidth = width;
     m_currentHeight = height;
 
-    // Defer old textures
-    uint64_t fenceValue = m_fenceManager->GetLastSignaledValue();
-    if (m_leftEyeTexture) m_fenceManager->DeferRelease(m_leftEyeTexture, fenceValue);
-    if (m_rightEyeTexture) m_fenceManager->DeferRelease(m_rightEyeTexture, fenceValue);
+    // Defer old textures (null-checked m_fenceManager, HIGH-08)
+    if (m_fenceManager) {
+        uint64_t fenceValue = m_fenceManager->GetLastSignaledValue();
+        if (m_leftEyeTexture) m_fenceManager->DeferRelease(m_leftEyeTexture, fenceValue);
+        if (m_rightEyeTexture) m_fenceManager->DeferRelease(m_rightEyeTexture, fenceValue);
+    }
     m_leftEyeTexture.Reset();
     m_rightEyeTexture.Reset();
 
@@ -135,10 +139,7 @@ bool DX12StereoResourceManager::CreateEyeTextures(uint32_t width, uint32_t heigh
     }
     m_rightEyeTexture->SetName(L"NexVR_RightEyeTexture");
 
-    // Recreate UAVs
-    D3D12_CPU_DESCRIPTOR_HANDLE uavHandle = m_cbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart();
-    uavHandle.ptr += 3 * m_descriptorSize; // Skip CBV(1) + SRV(2)
-
+    // Recreate UAVs across all ring-buffered frame slots (HIGH-08)
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     if (desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) {
         uavDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -148,17 +149,23 @@ bool DX12StereoResourceManager::CreateEyeTextures(uint32_t width, uint32_t heigh
         uavDesc.Format = desc.Format;
     }
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    
-    m_device->CreateUnorderedAccessView(m_leftEyeTexture.Get(), nullptr, &uavDesc, uavHandle);
-    uavHandle.ptr += m_descriptorSize;
-    m_device->CreateUnorderedAccessView(m_rightEyeTexture.Get(), nullptr, &uavDesc, uavHandle);
+
+    D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_cbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart();
+    for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot) {
+        D3D12_CPU_DESCRIPTOR_HANDLE uavHandle = heapStart;
+        uavHandle.ptr += static_cast<SIZE_T>(slot * DESCRIPTORS_PER_FRAME + 3) * m_descriptorSize;
+        m_device->CreateUnorderedAccessView(m_leftEyeTexture.Get(), nullptr, &uavDesc, uavHandle);
+        uavHandle.ptr += m_descriptorSize;
+        m_device->CreateUnorderedAccessView(m_rightEyeTexture.Get(), nullptr, &uavDesc, uavHandle);
+    }
 
     return true;
 }
 
 bool DX12StereoResourceManager::CreateDescriptorHeaps() {
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.NumDescriptors = 5; // 1 CBV + 2 SRV (Cam, Depth) + 2 UAV (Left, Right)
+    // 3-frame ring buffer * (1 CBV + 2 SRV + 2 UAV) = 15 descriptors (eliminates in-flight GPU/CPU race, HIGH-08)
+    heapDesc.NumDescriptors = MAX_FRAMES_IN_FLIGHT * DESCRIPTORS_PER_FRAME;
     heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
@@ -176,7 +183,7 @@ bool DX12StereoResourceManager::CreateConstantBuffer() {
 
     D3D12_RESOURCE_DESC desc = {};
     desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    desc.Width = 512; // Expanded for P0.2/P1.1/P1.2/P2 (two 256-byte aligned chunks)
+    desc.Width = sizeof(DX12StereoShaderConstants) * MAX_FRAMES_IN_FLIGHT; // 3 x 512-byte ring-buffered CBV slots (HIGH-08)
     desc.Height = 1;
     desc.DepthOrArraySize = 1;
     desc.MipLevels = 1;
@@ -196,13 +203,18 @@ bool DX12StereoResourceManager::CreateConstantBuffer() {
         return false;
     }
 
-    // Create CBV
-    D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-    cbvDesc.BufferLocation = m_constantBuffer->GetGPUVirtualAddress();
-    cbvDesc.SizeInBytes = 512;
+    // Create ring-buffered CBVs (one 512-byte slot per frame in flight)
+    const D3D12_GPU_VIRTUAL_ADDRESS gpuBase = m_constantBuffer->GetGPUVirtualAddress();
+    const D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_cbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart();
+    for (uint32_t slot = 0; slot < MAX_FRAMES_IN_FLIGHT; ++slot) {
+        D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+        cbvDesc.BufferLocation = gpuBase + static_cast<UINT64>(slot) * sizeof(DX12StereoShaderConstants);
+        cbvDesc.SizeInBytes = sizeof(DX12StereoShaderConstants);
 
-    D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle = m_cbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart();
-    m_device->CreateConstantBufferView(&cbvDesc, cbvHandle);
+        D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle = heapStart;
+        cbvHandle.ptr += static_cast<SIZE_T>(slot * DESCRIPTORS_PER_FRAME) * m_descriptorSize;
+        m_device->CreateConstantBufferView(&cbvDesc, cbvHandle);
+    }
 
     return true;
 }
@@ -258,9 +270,12 @@ void DX12StereoResourceManager::UpdateFrameResources(
     const EyeView& rightEye,
     const CameraSnapshot& cam,
     const DepthSnapshot& depth,
-    bool shouldAttemptStereo) 
+    bool shouldAttemptStereo,
+    uint32_t frameSlot) 
 {
     if (!m_device || !m_cbvSrvUavHeap) return;
+
+    const uint32_t slot = frameSlot % MAX_FRAMES_IN_FLIGHT;
 
     // HandleResize has its own internal locking — call it before acquiring m_mutex
     // to avoid recursive lock deadlock
@@ -284,6 +299,7 @@ void DX12StereoResourceManager::UpdateFrameResources(
     }
 
     std::lock_guard<std::mutex> lock(m_mutex);
+    m_activeFrameSlot = slot;
 
     // Update constant buffer data with exact reprojection parameters
     if (m_mappedConstantBuffer) {
@@ -344,18 +360,46 @@ void DX12StereoResourceManager::UpdateFrameResources(
             consts.horizonLockStrength = 0.0f;
         }
 
-        memcpy(m_mappedConstantBuffer, &consts, sizeof(DX12StereoShaderConstants));
+        for (int i = 0; i < 4; ++i) {
+            consts.leftEyeFovTan[i] = leftEye.fovTan[i];
+            consts.rightEyeFovTan[i] = rightEye.fovTan[i];
+        }
+        float aspect = (m_currentHeight > 0)
+            ? (static_cast<float>(m_currentWidth) / static_cast<float>(m_currentHeight))
+            : (16.0f / 9.0f);
+        if (aspect < 0.5f || aspect > 4.0f) aspect = 16.0f / 9.0f;
+
+        float gameTanX = 1.0f;
+        float gameTanY = 1.0f / aspect;
+        float p00 = std::abs(cam.projection.m[0][0]);
+        float p11 = std::abs(cam.projection.m[1][1]);
+        if (p00 > 0.25f && p00 < 5.0f && p11 > 0.25f && p11 < 5.0f) {
+            gameTanX = (std::min)(1.85f, (std::max)(0.45f, 1.0f / p00));
+            gameTanY = (std::min)(1.40f, (std::max)(0.25f, 1.0f / p11));
+        }
+        consts.gameTanHalfFovX = gameTanX;
+        consts.gameTanHalfFovY = gameTanY;
+        consts.stereoIpd = (c.ipd > 0.01f) ? c.ipd : 0.064f;
+        consts.stereoConvergence = (c.convergence > 0.1f) ? c.convergence : 3.5f;
+        consts.isReversedZ = cam.reversedZ ? 1u : 0u;
+        consts.isLeftHanded = cam.isLeftHanded ? 1u : 0u;
+        consts.nearPlane = 0.1f;
+        consts.farPlane = 1000.0f;
+
+        auto* dstSlotPtr = static_cast<uint8_t*>(m_mappedConstantBuffer) + static_cast<size_t>(slot) * sizeof(DX12StereoShaderConstants);
+        memcpy(dstSlotPtr, &consts, sizeof(DX12StereoShaderConstants));
     }
 
-    UpdateViews(cam, depth);
+    UpdateViews(cam, depth, slot);
 }
 
-void DX12StereoResourceManager::UpdateViews(const CameraSnapshot& cam, const DepthSnapshot& depth) {
+void DX12StereoResourceManager::UpdateViews(const CameraSnapshot& cam, const DepthSnapshot& depth, uint32_t frameSlot) {
     if (!m_device || !m_cbvSrvUavHeap) return;
 
-    // Offset to SRV section
+    // Offset to SRV section for the active ring-buffered frame slot (HIGH-08)
+    const uint32_t slot = frameSlot % MAX_FRAMES_IN_FLIGHT;
     D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_cbvSrvUavHeap->GetCPUDescriptorHandleForHeapStart();
-    srvHandle.ptr += m_descriptorSize; // Skip CBV
+    srvHandle.ptr += static_cast<SIZE_T>(slot * DESCRIPTORS_PER_FRAME + 1) * m_descriptorSize; // Skip CBV
 
     ID3D12Resource* camRes = (cam.IsValid() && cam.resourceIdentity.nativeHandle) ? 
         reinterpret_cast<ID3D12Resource*>(cam.resourceIdentity.nativeHandle) : 
@@ -538,20 +582,22 @@ void DX12StereoResourceManager::UpdateViews(const CameraSnapshot& cam, const Dep
 
 D3D12_GPU_DESCRIPTOR_HANDLE DX12StereoResourceManager::GetCbvGpuHandle() const {
     if (!m_cbvSrvUavHeap) return {0};
-    return m_cbvSrvUavHeap->GetGPUDescriptorHandleForHeapStart();
+    auto handle = m_cbvSrvUavHeap->GetGPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<UINT64>(m_activeFrameSlot * DESCRIPTORS_PER_FRAME) * m_descriptorSize;
+    return handle;
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE DX12StereoResourceManager::GetSrvGpuHandle() const {
     if (!m_cbvSrvUavHeap) return {0};
     auto handle = m_cbvSrvUavHeap->GetGPUDescriptorHandleForHeapStart();
-    handle.ptr += m_descriptorSize;
+    handle.ptr += static_cast<UINT64>(m_activeFrameSlot * DESCRIPTORS_PER_FRAME + 1) * m_descriptorSize;
     return handle;
 }
 
 D3D12_GPU_DESCRIPTOR_HANDLE DX12StereoResourceManager::GetUavGpuHandle() const {
     if (!m_cbvSrvUavHeap) return {0};
     auto handle = m_cbvSrvUavHeap->GetGPUDescriptorHandleForHeapStart();
-    handle.ptr += 3 * m_descriptorSize;
+    handle.ptr += static_cast<UINT64>(m_activeFrameSlot * DESCRIPTORS_PER_FRAME + 3) * m_descriptorSize;
     return handle;
 }
 

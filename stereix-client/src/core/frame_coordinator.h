@@ -2,7 +2,6 @@
 #include "heuristics/render_frame_snapshot.h"
 
 #include <memory>
-#include <mutex>
 #include "rendering/igraphics_backend.h"
 #include "openxr/openxr_runtime_manager.h"
 #include "openxr/openxr_swapchain_manager.h"
@@ -20,9 +19,12 @@
 
 namespace vrinject {
 
+struct FrameCoordinatorOxrInitState;
+
 class FrameCoordinator {
 public:
-    FrameCoordinator() = default;
+    FrameCoordinator();
+    ~FrameCoordinator();
 
     void OnPresentBegin(const RenderFrameSnapshot& snapshot);
     void OnPresentEnd();
@@ -58,11 +60,11 @@ private:
     std::unique_ptr<IGraphicsBackend> m_graphicsBackend;
 
     std::unique_ptr<openxr::OpenXRHealthMonitor> m_oxrHealthMonitor;
-    std::mutex m_oxrRuntimeMutex;
-    std::unique_ptr<openxr::OpenXRRuntimeManager> m_pendingOxrRuntime;
-    std::unique_ptr<openxr::OpenXRRuntimeManager> m_oxrRuntime;
-    std::unique_ptr<openxr::OpenXRSwapchainManager> m_oxrSwapchain;
+    // Declaration order ensures m_oxrSubmitter is destroyed AFTER m_oxrRuntime (HIGH-09)
     std::unique_ptr<openxr::OpenXRFrameSubmitter> m_oxrSubmitter;
+    std::unique_ptr<openxr::OpenXRSwapchainManager> m_oxrSwapchain;
+    std::unique_ptr<openxr::OpenXRRuntimeManager> m_oxrRuntime;
+    std::unique_ptr<FrameCoordinatorOxrInitState> m_oxrInitState;
     std::unique_ptr<ai::AIScheduler> m_aiScheduler;
     InputManager m_inputManager;
     

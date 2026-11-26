@@ -49,6 +49,38 @@ describe('UpdateService', () => {
       expect(updateService.compareSemver('0.1.90', '0.1.97')).toBeLessThan(0);
       expect(updateService.compareSemver('1.0.0', '0.9.9')).toBeGreaterThan(0);
       expect(updateService.compareSemver('0.2.0', '0.1.99')).toBeGreaterThan(0);
+      // HIGH-03 prerelease ordering
+      expect(updateService.compareSemver('1.2.3-beta', '1.2.1')).toBeGreaterThan(0);
+      expect(updateService.compareSemver('1.2.3', '1.2.3-beta')).toBeGreaterThan(0);
+      expect(updateService.compareSemver('1.2.3-beta', '1.2.3')).toBeLessThan(0);
+      expect(updateService.compareSemver('1.2.3-beta.2', '1.2.3-beta.1')).toBeGreaterThan(0);
+    });
+  });
+
+  describe('S3 key traversal protection (HIGH-03)', () => {
+    it('rejects path traversal in getUploadUrl filename', async () => {
+      await expect(updateService.getUploadUrl('../secrets.json', 'application/octet-stream')).rejects.toThrow(/Invalid upload filename/);
+      await expect(updateService.getUploadUrl('foo/bar.exe', 'application/octet-stream')).rejects.toThrow(/Invalid upload filename/);
+      expect(mockStorage.getPresignedUploadUrl).not.toHaveBeenCalled();
+    });
+
+    it('rejects non-releases/ or traversal keys in publishRelease', async () => {
+      await expect(
+        updateService.publishRelease({
+          version: '0.1.122',
+          channel: ReleaseChannel.STABLE,
+          installerKey: 'private/secrets.exe',
+          sha256Hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        })
+      ).rejects.toThrow(/Invalid installerKey/);
+      await expect(
+        updateService.publishRelease({
+          version: '0.1.122',
+          channel: ReleaseChannel.STABLE,
+          installerKey: 'releases/../evil.exe',
+          sha256Hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        })
+      ).rejects.toThrow(/Invalid installerKey/);
     });
   });
 

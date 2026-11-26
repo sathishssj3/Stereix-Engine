@@ -25,6 +25,7 @@ struct Dx11SwapchainResources {
     UINT width = 0;
     UINT height = 0;
     bool fullscreen = false;
+    HWND outputWindow = nullptr;
 };
 
 // Dx11ContextSnapshot replaced by RenderFrameSnapshot

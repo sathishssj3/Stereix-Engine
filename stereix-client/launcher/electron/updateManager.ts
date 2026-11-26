@@ -151,39 +151,46 @@ export function purgeStaleOtaCacheIfAppNewer(): void {
 
     const updatesDir = getUpdatesDir();
     const profilesDir = path.join(updatesDir, 'profiles');
+    const shadersDir = path.join(updatesDir, 'shaders');
+    const filesToPurge = [
+      'vrinject.dll',
+      'vr-inject-cli.exe',
+      'onnxruntime.dll',
+      'DirectML.dll',
+      'openxr_loader.dll',
+      'vrinject.json',
+      'installed_manifest.json',
+      'manifest.json',
+    ];
 
-    // If in dev mode, or if local cached OTA belongs to an older version than the installed app,
-    // clear outdated cached binaries so the bundled assets are guaranteed to run.
-    if ((!app?.isPackaged) || (local && compareSemver(appVer, local.engineVersion) > 0)) {
-      console.info(`[UpdateManager] Purging stale OTA cache (devMode=${!app?.isPackaged}, appVer=${appVer}, localVer=${local?.engineVersion}).`);
-      const filesToPurge = ['vrinject.dll', 'vr-inject-cli.exe', 'vrinject.json', 'installed_manifest.json', 'manifest.json'];
+    // HIGH-10: Also detect unverified/tampered OTA artifacts when local manifest is missing or failed signature verification
+    const hasUntrustedArtifacts = !local && (
+      filesToPurge.some(f => fs.existsSync(path.join(updatesDir, f))) ||
+      fs.existsSync(shadersDir) ||
+      fs.existsSync(profilesDir)
+    );
+
+    // If in dev mode, if local cached OTA belongs to an older version than the installed app,
+    // or if unverified/tampered OTA files exist without a valid signed manifest, purge the cache.
+    if ((!app?.isPackaged) || (local && compareSemver(appVer, local.engineVersion) > 0) || hasUntrustedArtifacts) {
+      console.info(`[UpdateManager] Purging stale/untrusted OTA cache (devMode=${!app?.isPackaged}, appVer=${appVer}, localVer=${local?.engineVersion}, untrusted=${hasUntrustedArtifacts}).`);
       for (const f of filesToPurge) {
         const fp = path.join(updatesDir, f);
         if (fs.existsSync(fp)) {
           try { fs.unlinkSync(fp); } catch {}
         }
       }
-      const shadersDir = path.join(updatesDir, 'shaders');
       if (fs.existsSync(shadersDir)) {
         try { fs.rmSync(shadersDir, { recursive: true, force: true }); } catch {}
       }
       if (fs.existsSync(profilesDir)) {
         try { fs.rmSync(profilesDir, { recursive: true, force: true }); } catch {}
       }
-    } else if (fs.existsSync(profilesDir)) {
-      // Sanitize any lingering profiles with obsolete srgbCorrection: false
+      // Clean up any leftover staging directories from interrupted updates
       try {
-        const pFiles = fs.readdirSync(profilesDir);
-        for (const pf of pFiles) {
-          if (pf.endsWith('.json')) {
-            const pfPath = path.join(profilesDir, pf);
-            try {
-              const pData = JSON.parse(fs.readFileSync(pfPath, 'utf-8'));
-              if (pData.srgbCorrection === false) {
-                pData.srgbCorrection = true;
-                fs.writeFileSync(pfPath, JSON.stringify(pData, null, 2), 'utf-8');
-              }
-            } catch {}
+        for (const entry of fs.readdirSync(updatesDir)) {
+          if (entry.startsWith('.staging_')) {
+            fs.rmSync(path.join(updatesDir, entry), { recursive: true, force: true });
           }
         }
       } catch {}
@@ -193,8 +200,10 @@ export function purgeStaleOtaCacheIfAppNewer(): void {
   }
 }
 
-// Purge obsolete OTA cache on module startup
-purgeStaleOtaCacheIfAppNewer();
+// Purge obsolete OTA cache on Electron main-process startup only (never wipe real AppData during unit/static test imports)
+if (app && typeof app.getPath === 'function') {
+  purgeStaleOtaCacheIfAppNewer();
+}
 
 async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
   const controller = new AbortController();
@@ -229,6 +238,18 @@ async function fetchRemoteManifest(): Promise<{ manifest: UpdateManifest; baseUr
         throw new Error(`HTTP ${res.status}`);
       }
       const manifest = await res.json() as UpdateManifest;
+      // HIGH-10: Verify Ed25519 signature inside the mirror loop so a poisoned/stale mirror does not block failover
+      if (
+        !manifest ||
+        typeof manifest.engineVersion !== 'string' ||
+        !Array.isArray(manifest.files) ||
+        !manifest.hashes ||
+        typeof manifest.hashes !== 'object' ||
+        !verifyManifestSignature(manifest)
+      ) {
+        console.warn(`[UpdateManager] Mirror ${url} returned an invalid or untrusted manifest signature; failing over to next mirror.`);
+        continue;
+      }
       const baseUrl = url.substring(0, url.lastIndexOf('/') + 1);
       return { manifest, baseUrl };
     } catch (err: any) {
@@ -257,23 +278,33 @@ async function downloadFileWithFallback(
         throw new Error(`HTTP ${res.status} from ${fileUrl}`);
       }
       const buffer = Buffer.from(await res.arrayBuffer());
+      let verifiedBuffer: Buffer = buffer;
 
       // Cryptographic integrity verification against SHA-256 manifest hash
       const actualHash = crypto.createHash('sha256').update(buffer).digest('hex');
       if (actualHash.toLowerCase() !== expectedHash.toLowerCase()) {
         // Normalize text line endings (\r\n -> \n and \n -> \r\n) to prevent false-positive CRLF/LF rejections on text assets
+        // HIGH-10: Write the exact normalized bytes whose SHA-256 matched expectedHash so deploy-time hash checks succeed.
         const asString = buffer.toString('utf-8');
-        const hashLf = crypto.createHash('sha256').update(Buffer.from(asString.replace(/\r\n/g, '\n'), 'utf-8')).digest('hex');
-        const hashCrlf = crypto.createHash('sha256').update(Buffer.from(asString.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'), 'utf-8')).digest('hex');
-        if (hashLf.toLowerCase() !== expectedHash.toLowerCase() && hashCrlf.toLowerCase() !== expectedHash.toLowerCase()) {
-          throw new Error(
-            `Integrity check failed for ${fileName}: expected SHA-256 ${expectedHash}, got ${actualHash}`
-          );
+        const lfBuf = Buffer.from(asString.replace(/\r\n/g, '\n'), 'utf-8');
+        const hashLf = crypto.createHash('sha256').update(lfBuf).digest('hex');
+        if (hashLf.toLowerCase() === expectedHash.toLowerCase()) {
+          verifiedBuffer = lfBuf;
+        } else {
+          const crlfBuf = Buffer.from(asString.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'), 'utf-8');
+          const hashCrlf = crypto.createHash('sha256').update(crlfBuf).digest('hex');
+          if (hashCrlf.toLowerCase() === expectedHash.toLowerCase()) {
+            verifiedBuffer = crlfBuf;
+          } else {
+            throw new Error(
+              `Integrity check failed for ${fileName}: expected SHA-256 ${expectedHash}, got ${actualHash}`
+            );
+          }
         }
       }
 
       const tempPath = `${destPath}.tmp`;
-      fs.writeFileSync(tempPath, buffer);
+      fs.writeFileSync(tempPath, verifiedBuffer);
       fs.renameSync(tempPath, destPath);
       return;
     } catch (err: any) {
@@ -370,27 +401,53 @@ export async function checkForEngineHotfix(): Promise<UpdateStatus> {
         'https://raw.githubusercontent.com/sathishssj3/NexVR-Engine-Releases/main/updates/',
       ];
 
-      // Download all files in manifest with path traversal protection and integrity verification
+      // HIGH-10: Stage and verify ALL files in an isolated staging directory before promoting atomically
+      // so partial network/hash failures never leave mixed-version binaries or shaders in updatesDir.
       if (!remote.hashes || typeof remote.hashes !== 'object') {
         throw new Error('Integrity check rejected: OTA manifest is missing the hashes dictionary.');
       }
-      for (const file of remote.files) {
-        const dest = resolveWithinRoot(updatesDir, file);
-        const parentDir = path.dirname(dest);
-        if (!fs.existsSync(parentDir)) {
-          fs.mkdirSync(parentDir, { recursive: true });
+      const stagingDir = path.join(updatesDir, `.staging_${Date.now()}_${process.pid}`);
+      fs.mkdirSync(stagingDir, { recursive: true });
+      const stagedFiles: Array<{ file: string; stagedPath: string; finalDest: string }> = [];
+      try {
+        for (const file of remote.files) {
+          const finalDest = resolveWithinRoot(updatesDir, file);
+          const stagedPath = resolveWithinRoot(stagingDir, file);
+          const stagedParent = path.dirname(stagedPath);
+          if (!fs.existsSync(stagedParent)) {
+            fs.mkdirSync(stagedParent, { recursive: true });
+          }
+          const expectedHash = remote.hashes[file];
+          if (!expectedHash || typeof expectedHash !== 'string' || expectedHash.trim().length !== 64) {
+            throw new Error(`Integrity check rejected: file ${file} lacks a valid SHA-256 hash in the OTA manifest.`);
+          }
+          await downloadFileWithFallback(file, candidateBases, stagedPath, expectedHash);
+          stagedFiles.push({ file, stagedPath, finalDest });
+          console.info(`[UpdateManager] Downloaded & verified staged hotfix file: ${file}`);
         }
-        const expectedHash = remote.hashes[file];
-        if (!expectedHash || typeof expectedHash !== 'string' || expectedHash.trim().length !== 64) {
-          throw new Error(`Integrity check rejected: file ${file} lacks a valid SHA-256 hash in the OTA manifest.`);
-        }
-        await downloadFileWithFallback(file, candidateBases, dest, expectedHash);
-        console.info(`[UpdateManager] Downloaded & verified hotfix file: ${file}`);
-      }
 
-      // Save installed manifest
-      fs.writeFileSync(path.join(updatesDir, 'installed_manifest.json'), JSON.stringify(remote, null, 2));
-      console.info('[UpdateManager] Hotfix installation complete!');
+        // Promote verified staged files into updatesDir
+        for (const { stagedPath, finalDest } of stagedFiles) {
+          const parentDir = path.dirname(finalDest);
+          if (!fs.existsSync(parentDir)) {
+            fs.mkdirSync(parentDir, { recursive: true });
+          }
+          const promoteTmp = `${finalDest}.promote_${process.pid}.tmp`;
+          fs.copyFileSync(stagedPath, promoteTmp);
+          fs.renameSync(promoteTmp, finalDest);
+        }
+
+        // Write installed manifest LAST via atomic rename
+        const manifestDest = path.join(updatesDir, 'installed_manifest.json');
+        const manifestTmp = `${manifestDest}.tmp`;
+        fs.writeFileSync(manifestTmp, JSON.stringify(remote, null, 2));
+        fs.renameSync(manifestTmp, manifestDest);
+        console.info('[UpdateManager] Hotfix installation complete!');
+      } finally {
+        try {
+          fs.rmSync(stagingDir, { recursive: true, force: true });
+        } catch {}
+      }
 
       return {
         checking: false,

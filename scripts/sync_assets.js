@@ -1,7 +1,9 @@
 // ==============================================================================
 // sync_assets.js - Single-Source-of-Truth Asset Synchronization Pipeline
-// Synchronizes shaders and profiles across dev, release, OTA staging, and docs
-// Recomputes SHA-256 cryptographic hashes for updates/manifest.json automatically
+// Synchronizes binaries, shaders, and profiles across dev, release, OTA staging, and docs.
+// Recomputes SHA-256 hashes & Ed25519 signature for updates/manifest.json automatically.
+// CRIT-03 Guard: Verifies updates/vrinject.dll SHA-256 matches the UTF-16LE
+// EXPECTED_DLL_HASH embedded inside updates/vr-inject-cli.exe (never mutates DLL post-link).
 // ==============================================================================
 
 const fs = require('fs');
@@ -19,10 +21,10 @@ const launcherPkgFile = path.join(clientDir, 'launcher', 'package.json');
 const manifestFile = path.join(rootDir, 'updates', 'manifest.json');
 const docsManifestFile = path.join(docsDir, 'landing-page', 'public', 'updates', 'manifest.json');
 
-console.log('=== NexVR Engine Asset Synchronization Pipeline ===');
+console.log('=== Stereix Engine Asset Synchronization Pipeline ===');
 
 // 1. Read current version from package.json
-let currentVersion = '0.1.58';
+let currentVersion = '0.1.122';
 try {
   if (fs.existsSync(launcherPkgFile)) {
     const pkg = JSON.parse(fs.readFileSync(launcherPkgFile, 'utf-8'));
@@ -59,11 +61,22 @@ function safeCopyFileSync(src, dst) {
   }
 }
 
+function verifyEmbeddedDllHash(dllPath, cliPath) {
+  if (!fs.existsSync(dllPath) || !fs.existsSync(cliPath)) {
+    return { checked: false };
+  }
+  const dllHashUpper = crypto.createHash('sha256').update(fs.readFileSync(dllPath)).digest('hex').toUpperCase();
+  const cliBuf = fs.readFileSync(cliPath);
+  const hashUtf16Le = Buffer.from(dllHashUpper, 'utf16le');
+  const matched = cliBuf.indexOf(hashUtf16Le) !== -1;
+  return { checked: true, matched, dllHashUpper };
+}
+
 // 1.5 Synchronize native build binaries if present
 const binDir = path.join(rootDir, 'build', 'bin');
 const updatesDir = path.join(rootDir, 'updates');
 const docsUpdatesDir = path.join(docsDir, 'landing-page', 'public', 'updates');
-const appDataUpdatesDir = process.env.APPDATA ? path.join(process.env.APPDATA, 'NexVR Engine', 'updates') : null;
+const appDataUpdatesDir = process.env.APPDATA ? path.join(process.env.APPDATA, 'Stereix Engine', 'updates') : null;
 
 if (fs.existsSync(binDir)) {
   for (const binName of ['vrinject.dll', 'vr-inject-cli.exe']) {
@@ -80,7 +93,7 @@ if (fs.existsSync(binDir)) {
       if (appDataUpdatesDir) {
         if (!fs.existsSync(appDataUpdatesDir)) fs.mkdirSync(appDataUpdatesDir, { recursive: true });
         safeCopyFileSync(srcBin, path.join(appDataUpdatesDir, binName));
-        console.log(`[+] Synced binary ${binName} -> AppData/updates/${binName}`);
+        console.log(`[+] Synced binary ${binName} -> AppData/Stereix Engine/updates/${binName}`);
       }
     }
   }
@@ -111,16 +124,11 @@ if (fs.existsSync(srcShadersDir)) {
 
 // 3. Target Directories for Profiles
 const srcProfilesDir = path.join(clientDir, 'profiles');
-const appDataProfiles = path.join(
-  process.env.APPDATA || '',
-  'NexVR Engine',
-  'updates',
-  'profiles'
-);
+const appDataProfiles = appDataUpdatesDir ? path.join(appDataUpdatesDir, 'profiles') : null;
 const profileDestinations = [
   path.join(rootDir, 'updates', 'profiles'),
   path.join(docsDir, 'landing-page', 'public', 'updates', 'profiles'),
-  ...(process.env.APPDATA ? [appDataProfiles] : []),
+  ...(appDataProfiles ? [appDataProfiles] : []),
 ];
 
 if (fs.existsSync(srcProfilesDir)) {
@@ -136,16 +144,29 @@ if (fs.existsSync(srcProfilesDir)) {
   }
 }
 
-// 3.5 Automatically sign native binaries before computing hashes so hashes match signed binaries
+// 3.5 CRIT-03 Verification: vrinject.dll MUST already be signed pre-hash by CMake POST_BUILD.
+// Only sign unsigned vr-inject-cli.exe copies if needed, NEVER mutate vrinject.dll post-link.
 const signScript = path.join(rootDir, 'scripts', 'sign_binaries.ps1');
 if (fs.existsSync(signScript)) {
   try {
     const { execSync } = require('child_process');
-    console.log('[*] Signing native binaries prior to manifest hash calculation...');
-    execSync(`powershell.exe -ExecutionPolicy Bypass -File "${signScript}"`, { stdio: 'inherit' });
+    console.log('[*] Checking CLI Authenticode signatures (preserving vrinject.dll pre-hash bytes)...');
+    execSync(`powershell.exe -ExecutionPolicy Bypass -File "${signScript}" -SkipDllHashMutation`, { stdio: 'inherit' });
   } catch (err) {
     console.warn('[!] Binary signing warning:', err.message);
   }
+}
+
+const updatesDll = path.join(updatesDir, 'vrinject.dll');
+const updatesCli = path.join(updatesDir, 'vr-inject-cli.exe');
+const hashCheck = verifyEmbeddedDllHash(updatesDll, updatesCli);
+if (hashCheck.checked) {
+  if (!hashCheck.matched) {
+    console.error(`[FATAL CRIT-03] updates/vrinject.dll SHA-256 (${hashCheck.dllHashUpper}) does NOT match EXPECTED_DLL_HASH embedded in updates/vr-inject-cli.exe!`);
+    console.error('Rebuild with build.bat so vrinject.dll is signed BEFORE expected_hash.h is generated, then re-run npm run sync:assets.');
+    process.exit(1);
+  }
+  console.log(`[OK] Verified updates/vrinject.dll SHA-256 (${hashCheck.dllHashUpper.slice(0, 16)}...) matches EXPECTED_DLL_HASH in updates/vr-inject-cli.exe!`);
 }
 
 // 4. Recompute SHA-256 hashes and update manifest.json
@@ -156,7 +177,6 @@ if (fs.existsSync(manifestFile)) {
     manifest.timestamp = Date.now();
     manifest.buildDate = new Date().toISOString().split('T')[0];
 
-    const updatesDir = path.join(rootDir, 'updates');
     const hashes = {};
 
     if (Array.isArray(manifest.files)) {
@@ -210,10 +230,11 @@ if (fs.existsSync(manifestFile)) {
     if (appDataUpdatesDir) {
       if (!fs.existsSync(appDataUpdatesDir)) fs.mkdirSync(appDataUpdatesDir, { recursive: true });
       safeWriteFileSync(path.join(appDataUpdatesDir, 'manifest.json'), jsonStr);
-      console.log(`[+] Synced manifest -> AppData/updates/manifest.json`);
+      console.log(`[+] Synced manifest -> AppData/Stereix Engine/updates/manifest.json`);
     }
   } catch (e) {
     console.error('Error updating manifest:', e);
+    process.exit(1);
   }
 }
 

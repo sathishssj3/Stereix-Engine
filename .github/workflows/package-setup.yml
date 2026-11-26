@@ -4,20 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag (e.g. v0.1.0)'
+        description: 'Release tag (e.g. v0.1.122; leave blank to use package.json version)'
         required: false
-        default: 'v0.1.0'
+        default: ''
         type: string
       publish_to_releases_repo:
         description: 'Publish Setup.exe to sathishssj3/Stereix-Engine-Releases'
         required: false
-        default: true
+        default: false
         type: boolean
   push:
     tags:
       - 'v*'
-    branches:
-      - 'main'
     paths-ignore:
       - 'stereix-docs/**'
       - 'docs/**'
@@ -28,25 +26,61 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   package-setup:
-    name: Build and Package Setup.exe
+    name: Build, Test, and Package Setup.exe
     runs-on: windows-latest
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || contains(github.event.head_commit.message, '[package]') || contains(github.event.head_commit.message, '[build]')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    outputs:
+      release_tag: ${{ steps.release_info.outputs.tag }}
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Decode Release Signing Certificate (Pre-Hash)
+        shell: pwsh
+        env:
+          CERT_BASE64: ${{ secrets.SIGN_CERT_PATH }}
+          CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASS }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:CERT_BASE64) -or [string]::IsNullOrWhiteSpace($env:CERT_PASSWORD)) {
+            if ($env:GITHUB_REF -like 'refs/tags/*') {
+              throw "Release signing certificate secrets (SIGN_CERT_PATH / SIGN_CERT_PASS) are required for tagged releases."
+            }
+            Write-Host "::warning::SIGN_CERT_PATH not configured for manual dispatch — binaries will be unsigned."
+            exit 0
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP 'stereix-signing.pfx'
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:CERT_BASE64))
+          $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($certPath, $env:CERT_PASSWORD)
+          $eku = $cert.Extensions | Where-Object { $_ -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] } | Select-Object -First 1
+          if (-not $cert.HasPrivateKey -or (Get-Date) -lt $cert.NotBefore -or (Get-Date) -gt $cert.NotAfter -or
+              -not $eku -or -not @($eku.EnhancedKeyUsages | Where-Object { $_.Value -eq '1.3.6.1.5.5.7.3.3' }).Count) {
+            Remove-Item -LiteralPath $certPath -Force -ErrorAction SilentlyContinue
+            throw "Invalid code-signing certificate provided."
+          }
+          "SIGN_CERT_PATH=$certPath" >> $env:GITHUB_ENV
+          "SIGN_CERT_PASS=$env:CERT_PASSWORD" >> $env:GITHUB_ENV
 
       - name: Setup MSVC & CMake
         uses: ilammy/msvc-dev-cmd@v1.13.0
 
-      - name: Download Official DXC (for SPIR-V support)
-        shell: cmd
+      - name: Download Official DXC (SHA-256 Verified)
+        shell: pwsh
         run: |
-          curl.exe -L https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.7.2308/dxc_2023_08_14.zip -o dxc.zip
+          $ErrorActionPreference = 'Stop'
+          $expected = '01D4C4DFA37DEE21AFE70CAC510D63001B6B611A128E3760F168765EEAD1E625'
+          curl.exe -fsSL https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.7.2308/dxc_2023_08_14.zip -o dxc.zip
+          $actual = (Get-FileHash -LiteralPath dxc.zip -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($actual -ne $expected) {
+            throw "DXC SHA-256 mismatch! Expected $expected, got $actual"
+          }
           7z.exe x dxc.zip -odxc -y
 
       - name: Cache Vulkan SDK
@@ -54,17 +88,22 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\VulkanSDK
-          key: vulkan-sdk-1.4-windows
+          key: vulkan-sdk-1.3.296.0-windows
 
-      - name: Setup Vulkan SDK
+      - name: Setup Vulkan SDK (SHA-256 Verified)
         if: steps.cache-vulkan.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $VulkanVersion = "1.3.296.0"
+          $expected = 'ACB4AE0786FD3E558F8B3C36CC3EBA91638984217BA8A6795EC64D2F9FFD8C4B'
           $VulkanURL = "https://sdk.lunarg.com/sdk/download/$VulkanVersion/windows/VulkanSDK-$VulkanVersion-Installer.exe"
           Write-Host "Downloading Vulkan SDK $VulkanVersion..."
           Invoke-WebRequest -Uri $VulkanURL -OutFile VulkanSDK.exe
+          $actual = (Get-FileHash -LiteralPath .\VulkanSDK.exe -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($actual -ne $expected) {
+            throw "Vulkan SDK SHA-256 mismatch! Expected $expected, got $actual"
+          }
           Write-Host "Installing Vulkan SDK..."
           Start-Process -FilePath ".\VulkanSDK.exe" -ArgumentList "--root", "C:\VulkanSDK", "--accept-licenses", "--default-answer", "--confirm-command", "install" -Wait -NoNewWindow
 
@@ -79,31 +118,69 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Generate Dummy Models
+      - name: Verify or Prepare Models
         shell: pwsh
+        env:
+          RELEASE_MODELS_SHA256: ${{ secrets.RELEASE_MODELS_SHA256 }}
         run: |
-          pip install onnx
+          $ErrorActionPreference = 'Stop'
           $clientDir = 'stereix-client'
           if (-not (Test-Path "$clientDir/models")) { mkdir "$clientDir/models" }
-          python "$clientDir/generate_dummy_onnx.py"
-          Copy-Item "$clientDir/models/dummy.onnx" "$clientDir/models/depth_inpainter.onnx"
-          Copy-Item "$clientDir/models/dummy_ui.onnx" "$clientDir/models/ui_synthesizer.onnx"
+          if ($env:GITHUB_REF -like 'refs/tags/*') {
+            if ([string]::IsNullOrWhiteSpace($env:RELEASE_MODELS_SHA256)) {
+              throw "RELEASE_MODELS_SHA256 secret is required for tagged releases (dummy models are forbidden)."
+            }
+            $expected = ConvertFrom-Json -InputObject $env:RELEASE_MODELS_SHA256 -AsHashtable -ErrorAction Stop
+            foreach ($name in @('depth_inpainter.onnx', 'ui_synthesizer.onnx')) {
+              $filePath = Join-Path "$clientDir/models" $name
+              if (-not (Test-Path -LiteralPath $filePath) -or -not $expected.ContainsKey($name)) {
+                throw "Missing required production model weight: $name"
+              }
+              $actual = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToUpperInvariant()
+              if ($actual -ne $expected[$name].ToUpperInvariant()) {
+                throw "Production model hash mismatch for $name"
+              }
+            }
+          } else {
+            pip install onnx
+            python "$clientDir/generate_dummy_onnx.py"
+            if (-not (Test-Path "$clientDir/models/depth_inpainter.onnx")) {
+              Copy-Item "$clientDir/models/dummy.onnx" "$clientDir/models/depth_inpainter.onnx"
+            }
+            if (-not (Test-Path "$clientDir/models/ui_synthesizer.onnx")) {
+              Copy-Item "$clientDir/models/dummy_ui.onnx" "$clientDir/models/ui_synthesizer.onnx"
+            }
+          }
 
       - name: Configure CMake
-        run: cmake -B build -S . -A x64 -DDXC_EXECUTABLE="${{ github.workspace }}/dxc/bin/x64/dxc.exe"
+        run: cmake -B build -S . -A x64 -DDXC_EXECUTABLE="${{ github.workspace }}/dxc/bin/x64/dxc.exe" -DBUILD_TESTS=ON
 
-      - name: Build Native Engine Targets (Release)
+      - name: Build Native Engine & Test Targets (Release)
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Continue'
-          # Build shaders, then injection DLL, then CLI with parallel MSVC compilation
-          cmake --build build --config Release --target copy_shaders_for_dx12
+          $ErrorActionPreference = 'Stop'
+          cmake --build build --config Release -- /maxcpucount
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build build --config Release --target vrinject -- /maxcpucount
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build build --config Release --target vr-inject-cli -- /maxcpucount
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build build --config Release --target d3d11_proxy dxgi_proxy -- /maxcpucount
+
+      - name: Verify Embedded DLL Hash Integrity (CRIT-03)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = 'build/bin/vrinject.dll'
+          $cli = 'build/bin/vr-inject-cli.exe'
+          $dllHash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToUpperInvariant()
+          $cliImage = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $cli).Path)
+          if (-not [Text.Encoding]::Unicode.GetString($cliImage).Contains($dllHash)) {
+            throw "FATAL CRIT-03: vrinject.dll SHA-256 ($dllHash) does NOT match EXPECTED_DLL_HASH in vr-inject-cli.exe!"
+          }
+          Write-Host "[OK] Verified vrinject.dll SHA-256 matches CLI embedded hash."
+
+      - name: Run Coupling Ratchets & CTest Suite
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/check_coupling.ps1
+          ctest --test-dir build -C Release --output-on-failure --timeout 180
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Setup Node.js
@@ -113,9 +190,11 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'stereix-client/launcher/package-lock.json'
 
-      - name: Install Launcher Dependencies
+      - name: Install Launcher Dependencies & Run CI Checks
         working-directory: ./stereix-client/launcher
-        run: npm ci
+        run: |
+          npm ci
+          npm run test:ci
 
       - name: Link Build Output for Launcher Packaging
         shell: pwsh
@@ -133,10 +212,18 @@ jobs:
       - name: Determine Release Tag
         id: release_info
         shell: pwsh
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
+          $ErrorActionPreference = 'Stop'
           $pkgVersion = (Get-Content ./stereix-client/launcher/package.json | ConvertFrom-Json).version
-          if ([string]::IsNullOrWhiteSpace($pkgVersion)) { $pkgVersion = "0.1.10" }
-          $tag = if ('${{ inputs.release_tag }}') { '${{ inputs.release_tag }}' } else { "v$pkgVersion" }
+          if ([string]::IsNullOrWhiteSpace($pkgVersion)) {
+            throw "Could not read version from stereix-client/launcher/package.json"
+          }
+          $tag = if (-not [string]::IsNullOrWhiteSpace($env:INPUT_RELEASE_TAG)) { $env:INPUT_RELEASE_TAG.Trim() } else { "v$pkgVersion" }
+          if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') {
+            throw "Invalid release tag format rejected: $tag"
+          }
           echo "tag=$tag" >> $env:GITHUB_OUTPUT
           echo "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
           Write-Host "Computed release tag: $tag (package version: $pkgVersion)"
@@ -162,26 +249,46 @@ jobs:
             stereix-client/launcher/dist-electron/*-Engine-Portable-*.exe
           retention-days: 30
 
+  publish-release:
+    name: Publish Verified Release
+    needs: package-setup
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_to_releases_repo == true)
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Verified Setup Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Stereix-Engine-Setup
+          path: stereix-client/launcher/dist-electron
+
       - name: Publish to Stereix-Engine Releases (Local Repo)
-        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || inputs.release_tag != ''
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release_info.outputs.tag }}
+          tag_name: ${{ needs.package-setup.outputs.release_tag }}
           files: |
             stereix-client/launcher/dist-electron/*-Engine-Setup-*.exe
             stereix-client/launcher/dist-electron/*-Engine-Portable-*.exe
 
       - name: Publish to Stereix-Engine-Releases Repo
-        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || (inputs.publish_to_releases_repo == true)
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_to_releases_repo == true)
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets['RELEASES_REPO_TOKEN'] || '' }}
-          TAG: ${{ steps.release_info.outputs.tag }}
+          TAG: ${{ needs.package-setup.outputs.release_tag }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
             Write-Host "No RELEASES_REPO_TOKEN secret found. Skipping cross-repo release upload."
             exit 0
           }
-          $tagToUse = if ($env:TAG) { $env:TAG } else { "v0.1.99" }
+          if ($env:TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') {
+            throw "Invalid release tag rejected."
+          }
           $scriptPath = if (Test-Path ./stereix-client/scripts/upload_to_releases_repo.ps1) { "./stereix-client/scripts/upload_to_releases_repo.ps1" } else { "./scripts/upload_to_releases_repo.ps1" }
-          & $scriptPath -Token $env:GH_TOKEN -Tag $tagToUse
+          & $scriptPath -Token $env:GH_TOKEN -Tag $env:TAG

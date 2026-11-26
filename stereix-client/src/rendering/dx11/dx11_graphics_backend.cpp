@@ -262,29 +262,84 @@ void DX11GraphicsBackend::SubmitStereoFrame(
             gpuProfiler.BeginSegment(static_cast<ID3D11DeviceContext*>(currentSnapshot.nativeContext),
                                      GpuSegment::OpenXrSubmission);
 
-            // Render In-Headset ImGui Overlay onto VR eye buffers if active
-            if (OverlayManager::GetInstance().IsOverlayVisible() && leftSubmit) {
+            // Render In-Headset ImGui Overlay onto dedicated OpenXR XrCompositionLayerQuad
+            // so the OpenXR compositor reprojects it cleanly for every headset's asymmetric FOV
+            // and IPD with zero double vision. Falls back to direct eye-buffer draw if quad fails.
+            static bool s_wasOverlayVisible = false;
+            bool overlayVisible = OverlayManager::GetInstance().IsOverlayVisible();
+            bool overlayJustOpened = overlayVisible && !s_wasOverlayVisible;
+            s_wasOverlayVisible = overlayVisible;
+
+            bool overlaySubmittedViaQuad = false;
+            if (overlayVisible && oxrSwapchain && xrRuntime) {
                 auto* d3d11Context = static_cast<ID3D11DeviceContext*>(currentSnapshot.nativeContext);
                 ImGuiDX11Integration::GetInstance().Initialize(m_device, d3d11Context);
-                ImGuiDX11Integration::GetInstance().Render(m_device, d3d11Context, leftSubmit, rightSubmit);
-            }
 
-            // Handle floating HUD quad submission if UI layer is detected
-            if (uiMaskHandle && oxrSwapchain && oxrSwapchain->GetHudSwapchain() != XR_NULL_HANDLE) {
-                uint32_t hudImageIndex = 0;
-                if (oxrSwapchain->AcquireHudImage(hudImageIndex)) {
-                    if (oxrSwapchain->WaitHudImage()) {
-                        ID3D11Texture2D* hudDest = oxrSwapchain->GetHudSwapchainImageD3D11(hudImageIndex);
-                        auto* d3d11Context = static_cast<ID3D11DeviceContext*>(currentSnapshot.nativeContext);
-                        if (hudDest && d3d11Context) {
-                            d3d11Context->CopyResource(hudDest, static_cast<ID3D11Resource*>(uiMaskHandle));
+                const uint32_t hudW = 1280;
+                const uint32_t hudH = 720;
+                if (oxrSwapchain->GetHudSwapchain() == XR_NULL_HANDLE) {
+                    oxrSwapchain->CreateHudSwapchain(
+                        xrRuntime->GetSession(),
+                        oxrSwapchain->GetFormat(),
+                        hudW, hudH,
+                        GraphicsBackend::DX11);
+                }
+
+                if (oxrSwapchain->GetHudSwapchain() != XR_NULL_HANDLE) {
+                    uint32_t hudImageIndex = 0;
+                    if (oxrSwapchain->AcquireHudImage(hudImageIndex)) {
+                        if (oxrSwapchain->WaitHudImage()) {
+                            ID3D11Texture2D* hudDest = oxrSwapchain->GetHudSwapchainImageD3D11(hudImageIndex);
+                            if (hudDest && ImGuiDX11Integration::GetInstance().RenderToOverlayQuad(m_device, d3d11Context, hudDest)) {
+                                XrPosef midHeadPose = leftPose;
+                                midHeadPose.position.x = 0.5f * (leftPose.position.x + rightPose.position.x);
+                                midHeadPose.position.y = 0.5f * (leftPose.position.y + rightPose.position.y);
+                                midHeadPose.position.z = 0.5f * (leftPose.position.z + rightPose.position.z);
+                                oxrSubmitter->SetHudQuadAnchored(
+                                    oxrSwapchain->GetHudSwapchain(),
+                                    oxrSwapchain->GetHudWidth(),
+                                    oxrSwapchain->GetHudHeight(),
+                                    midHeadPose,
+                                    overlayJustOpened);
+                                overlaySubmittedViaQuad = true;
+                            }
                         }
                         oxrSwapchain->ReleaseHudImage();
-                        oxrSubmitter->SetHudQuad(oxrSwapchain->GetHudSwapchain(), currentSnapshot.width, currentSnapshot.height);
                     }
                 }
-            } else {
-                oxrSubmitter->ClearHudQuad();
+
+                if (!overlaySubmittedViaQuad && leftSubmit) {
+                    ImGuiDX11Integration::GetInstance().Render(m_device, d3d11Context, leftSubmit, rightSubmit);
+                }
+            }
+
+            // Handle floating HUD quad submission if UI layer is detected (when ImGui overlay is closed)
+            if (!overlaySubmittedViaQuad) {
+                if (uiMaskHandle && oxrSwapchain && oxrSwapchain->GetHudSwapchain() != XR_NULL_HANDLE) {
+                    uint32_t hudImageIndex = 0;
+                    if (oxrSwapchain->AcquireHudImage(hudImageIndex)) {
+                        bool copied = false;
+                        if (oxrSwapchain->WaitHudImage()) {
+                            ID3D11Texture2D* hudDest = oxrSwapchain->GetHudSwapchainImageD3D11(hudImageIndex);
+                            auto* d3d11Context = static_cast<ID3D11DeviceContext*>(currentSnapshot.nativeContext);
+                            if (hudDest && d3d11Context) {
+                                d3d11Context->CopyResource(hudDest, static_cast<ID3D11Resource*>(uiMaskHandle));
+                                copied = true;
+                            }
+                        }
+                        // Always release acquired HUD image even if WaitHudImage failed (HIGH-09)
+                        oxrSwapchain->ReleaseHudImage();
+                        if (copied) {
+                            const uint32_t hudW = oxrSwapchain->GetHudWidth() > 0 ? oxrSwapchain->GetHudWidth() : currentSnapshot.width;
+                            const uint32_t hudH = oxrSwapchain->GetHudHeight() > 0 ? oxrSwapchain->GetHudHeight() : currentSnapshot.height;
+                            oxrSubmitter->SetHudQuad(oxrSwapchain->GetHudSwapchain(), hudW, hudH);
+                        } else {
+                            oxrSubmitter->ClearHudQuad();
+                        }
+                    }
+                } else {
+                    oxrSubmitter->ClearHudQuad();
+                }
             }
 
             bool isCinema = false;

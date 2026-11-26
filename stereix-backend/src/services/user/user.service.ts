@@ -65,5 +65,10 @@ export class UserService {
       where: { id: userId },
       data: { passwordHash: newHash },
     });
+    // HIGH-02: Revoke all active refresh tokens on password change
+    await db.refreshToken.updateMany({
+      where: { userId, revoked: false },
+      data: { revoked: true },
+    });
   }
 }
